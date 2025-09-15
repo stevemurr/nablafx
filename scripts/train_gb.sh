@@ -1,5 +1,5 @@
-CUDA_VISIBLE_DEVICES=0 \
+CUDA_VISIBLE_DEVICES=1 \
 python scripts/main.py fit \
--c cfg/data/data-param_multidrive-ffuzz_trainval.yaml \
--c cfg/model/gb/gb-param_fuzz/model_gb-param_fuzz-rnl_peq.sc+g.sc+off.dc+phinv+rnl+g.sc+peq.sc+lp.s.yaml \
--c cfg/trainer/trainer_gb.yaml
+-c cfg-new/data/data_ampeg-optocomp_trainval.yaml \
+-c cfg-new/model/gb/gb_comp/model_gb_comp_peq.s+g.d+peq.s+g.s.yaml \
+-c cfg-new/trainer/trainer_gb.yaml

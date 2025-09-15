@@ -3,6 +3,7 @@ __pycache__
 checkpoints_fad
 frechet-audio-distance
 data/*
+logs/*
 wandb
 .DS_Store
 .*
