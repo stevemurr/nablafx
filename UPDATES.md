@@ -18,11 +18,24 @@
   - ✅ **Full verification** - no old loss configurations remain
   - 📍 **Location**: `cfg-new/` directory, `MIGRATION_SUMMARY.md`
 
+### ✅ Completed (Week 2)
+- **Callback System**: Extract logging functions from system.py into callback classes
+  - ✅ Created modular callback architecture using PyTorch Lightning's callback system
+  - ✅ **AudioLoggingCallback** - Configurable audio sample logging with W&B integration
+  - ✅ **MetricsLoggingCallback** - Flexible metrics computation and logging system
+  - ✅ **FrequencyResponseCallback** - Frequency response visualization at configurable intervals
+  - ✅ **FADComputationCallback** - Multi-model FAD score computation (VGGish, PANN, CLAP, AFX-Rep)
+  - ✅ **ParameterVisualizationCallback** - Gray-box model parameter and response visualization
+  - ✅ **Configuration-driven setup** - Full YAML configuration support for all callbacks
+  - ✅ **Backward compatibility** - Works with existing system classes without breaking changes
+  - ✅ **Trainer configuration migration** - Updated all `cfg-new/trainer/` configs to use callbacks
+  - 📍 **Location**: `nablafx/callbacks/`, `cfg-new/trainer/`, `examples/`
+
 ### 🔄 In Progress
-- **Documentation**: Adding usage examples and migration guide
+- **Documentation**: Finalizing usage examples and migration guide for callback system
 
 ### ⏳ Next Up
-- **Callback System**: Extract logging functions from system.py into callback classes
+- **Package Structure Refactoring**: Reorganize modules into logical subpackages
 
 ---
 
@@ -426,7 +439,7 @@ trainer:
 ### Phase 2: Core Audio Features (Weeks 5-8) - 🔄 **STARTED EARLY**
 1. **Processor architecture refactoring** - Clean separation and interfaces ⏳ **PENDING**
 2. ✅ **Loss function configuration system** - Flexible loss composition via YAML ✅ **COMPLETED**
-3. **Callback-based logging system** - Modular, configurable logging 🔄 **NEXT UP**
+3. ✅ **Callback-based logging system** - Modular, configurable logging ✅ **COMPLETED**
 4. **Model factory patterns** - Easy model composition ⏳ **PENDING**
 
 ### Phase 3: Advanced Features (Weeks 9-12) - ⏳ **FUTURE**
@@ -436,10 +449,10 @@ trainer:
 4. **Distribution and examples** - Packaging, tutorials, best practices ⏳ **PENDING**
 
 ### 📊 Progress Summary
-- **Completed**: 2/12 major items (16.7%)
+- **Completed**: 4/12 major items (33.3%)
 - **In Progress**: 0/12 major items (0%)  
-- **Pending**: 10/12 major items (83.3%)
-- **Current Focus**: Callback-based logging system (Week 2 priority)
+- **Pending**: 8/12 major items (66.7%)
+- **Current Focus**: Package structure refactoring (Week 3-4 priority)
 
 ---
 
