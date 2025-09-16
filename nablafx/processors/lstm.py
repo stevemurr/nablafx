@@ -1,6 +1,6 @@
 import torch
 
-from nablafx.modules import TVFiLMCond
+from .components import TVFiLMCond
 
 
 # -----------------------------------------------------------------------------

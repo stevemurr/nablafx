@@ -37,6 +37,28 @@ from .ddsp import (
     StaticRationalNonlinearity,
 )
 
+# Neural network components
+from .components import (
+    # Utility functions
+    center_crop,
+    causal_crop,
+    # General components
+    MLP,
+    FiLM,
+    TFiLM,
+    TinyTFiLM,
+    TVFiLMMod,
+    TVFiLMCond,
+)
+
+# Architecture-specific blocks
+from .blocks import (
+    TCNCondBlock,
+    GCNCondBlock,
+    S4CondBlock,
+    DSSM,
+)
+
 # Neural architectures
 from .lstm import LSTM
 from .tcn import TCN
@@ -71,6 +93,20 @@ __all__ = [
     "TanhNonlinearity",
     "StaticMLPNonlinearity",
     "StaticRationalNonlinearity",
+    # Neural network components
+    "center_crop",
+    "causal_crop",
+    "MLP",
+    "FiLM",
+    "TFiLM",
+    "TinyTFiLM",
+    "TVFiLMMod",
+    "TVFiLMCond",
+    # Architecture-specific blocks
+    "TCNCondBlock",
+    "GCNCondBlock",
+    "S4CondBlock",
+    "DSSM",
     # Neural architectures
     "LSTM",
     "TCN",

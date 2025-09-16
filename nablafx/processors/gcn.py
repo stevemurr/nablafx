@@ -1,6 +1,7 @@
 import torch
 
-from nablafx.modules import MLP, GCNCondBlock, TFiLM, TinyTFiLM, TVFiLMCond, causal_crop, center_crop
+from .components import MLP, TFiLM, TinyTFiLM, TVFiLMCond, causal_crop, center_crop
+from .blocks import GCNCondBlock
 
 
 """

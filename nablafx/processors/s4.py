@@ -9,8 +9,8 @@ module_path = os.path.abspath(os.path.join(".."))
 if module_path not in sys.path:
     sys.path.append(module_path)
 
-from nablafx.modules import MLP, TCNCondBlock, TFiLM, TinyTFiLM, TVFiLMCond
-from nablafx.modules import S4CondBlock
+from .components import MLP, TFiLM, TinyTFiLM, TVFiLMCond
+from .blocks import TCNCondBlock, S4CondBlock
 
 
 class S4(torch.nn.Module):

@@ -8,7 +8,7 @@ Controllers generate control parameters for processors based on input signals an
 import torch
 from typing import Union
 
-from nablafx.modules import MLP
+from nablafx.processors.components import MLP
 
 
 # -----------------------------------------------------------------------------
