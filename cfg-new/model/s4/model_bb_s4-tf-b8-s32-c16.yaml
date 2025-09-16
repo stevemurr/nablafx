@@ -9,7 +9,7 @@ model:
       class_path: nablafx.models.BlackBoxModel
       init_args:
         processor:
-          class_path: nablafx.s4.S4
+          class_path: nablafx.processors.s4.S4
           init_args:
             num_inputs: 1
             num_outputs: 1

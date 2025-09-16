@@ -9,7 +9,7 @@ model:
       class_path: nablafx.models.BlackBoxModel
       init_args:
         processor:
-          class_path: nablafx.gcn.GCN
+          class_path: nablafx.processors.gcn.GCN
           init_args:
             num_inputs: 1
             num_outputs: 1
