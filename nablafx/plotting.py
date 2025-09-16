@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 from torchvision.transforms import ToTensor
 
-from nablafx.models import GreyBoxModel, BlackBoxModel
+from nablafx.core.models import GreyBoxModel, BlackBoxModel
 from nablafx.processors import (
     PhaseInversion,
     Gain,
