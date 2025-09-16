@@ -4,7 +4,6 @@ model:
     lr: 0.005
     use_callbacks: true
     log_media_every_n_steps: 1000
-
     model:
       class_path: nablafx.models.BlackBoxModel
       init_args:
@@ -23,23 +22,20 @@ model:
             groups: 1
             bias: true
             causal: true
-            batchnorm: false # active only when cond_type = None
+            batchnorm: false
             residual: true
             direct_path: false
-            cond_type: tvfilm # null, film, tfilm, ttfilm, tvfilm
-            cond_block_size: 128 # block size for tfilm or tvfilm
-            cond_num_layers: 1 # number of lstm layers for tfilm or tvfilm
-            act_type: tanh # tanh, prelu, rational
-
+            cond_type: tvfilm
+            cond_block_size: 128
+            cond_num_layers: 1
+            act_type: tanh
     loss:
-      class_path: nablafx.loss.WeightedMultiLoss
+      class_path: nablafx.evaluation.FlexibleLoss
       init_args:
         losses:
-          - loss:
-              class_path: torch.nn.L1Loss
-            weight: 10
-            name: "l1"
-          - loss:
-              class_path: auraloss.freq.MultiResolutionSTFTLoss
-            weight: 1
-            name: "mrstft"
+        - name: l1_loss
+          weight: 10
+          alias: l1
+        - name: mrstft_loss
+          weight: 1
+          alias: mrstft

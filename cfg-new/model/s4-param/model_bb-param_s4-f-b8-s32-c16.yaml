@@ -4,7 +4,6 @@ model:
     lr: 0.01
     use_callbacks: true
     log_media_every_n_steps: 3000
-
     model:
       class_path: nablafx.models.BlackBoxModel
       init_args:
@@ -17,24 +16,21 @@ model:
             num_blocks: 8
             s4_state_dim: 32
             channel_width: 16
-            batchnorm: False
-            residual: True
-            direct_path: False
+            batchnorm: false
+            residual: true
+            direct_path: false
             cond_type: film
             cond_block_size: 128
             cond_num_layers: 1
             act_type: tanh
             s4_learning_rate: 0.01
-
     loss:
-      class_path: nablafx.loss.WeightedMultiLoss
+      class_path: nablafx.evaluation.FlexibleLoss
       init_args:
         losses:
-          - loss:
-              class_path: torch.nn.L1Loss
-            weight: .5
-            name: "l1"
-          - loss:
-              class_path: auraloss.freq.MultiResolutionSTFTLoss
-            weight: .5
-            name: "mrstft"
+        - name: l1_loss
+          weight: 0.5
+          alias: l1
+        - name: mrstft_loss
+          weight: 0.5
+          alias: mrstft
