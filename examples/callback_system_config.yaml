@@ -7,21 +7,21 @@ model:
   init_args:
     # model parameters...
 
-# Loss configuration (using the new WeightedMultiLoss system)
+# Loss configuration (using the new FlexibleLoss system)
 loss:
-  class_path: nablafx.loss.WeightedMultiLoss
+  class_path: nablafx.evaluation.FlexibleLoss
   init_args:
     losses:
-      - loss:
-          class_path: auraloss.time.ESRLoss
+      - name: "esr_loss"
         weight: 0.4
-        name: "esr"
-      - loss:
-          class_path: auraloss.freq.MultiResolutionSTFTLoss
-          init_args:
-            fft_sizes: [1024, 2048, 512]
+        alias: "esr"
+      - name: "mrstft_loss"
         weight: 0.6
-        name: "multi_stft"
+        alias: "multi_stft"
+        params:
+          fft_sizes: [1024, 2048, 512]
+          hop_sizes: [256, 512, 128]
+          win_lengths: [1024, 2048, 512]
 
 # System configuration (now with minimal logging)
 system:
