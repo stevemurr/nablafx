@@ -1,5 +1,5 @@
 trainer:
-  gradient_clip_val: null # gradient clip applied manually in training step
+  gradient_clip_val: null # gradient        fad_metrics: ["fad_vggish_metric", "fad_pann_metric", "fad_clap_metric"]  # Restored CLAP supportclip applied manually in training step
   max_steps: 451000
 
   logger:

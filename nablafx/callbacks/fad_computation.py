@@ -55,10 +55,11 @@ class FADComputationCallback(Callback):
     def _get_default_fad_metrics(self) -> List[str]:
         """Get default FAD metrics configuration.
 
-        Only includes metrics that are supported by the installed frechet_audio_distance package.
-        Currently supports: VGGish and PANN models.
+        Includes metrics supported by the current frechet_audio_distance package.
+        Currently supports: VGGish, PANN, and CLAP models.
+        AFX-Rep is not supported by the current package version.
         """
-        return ["fad_vggish_metric", "fad_pann_metric"]
+        return ["fad_vggish_metric", "fad_pann_metric", "fad_clap_metric"]
 
     def _create_fad_metrics_from_registry(self, metrics_config: List[Union[str, Dict[str, Any]]]) -> Dict[str, Any]:
         """Create FAD metrics using the evaluation registry."""

@@ -1,5 +1,5 @@
 # Example configuration showing how to use the new callback system
-# This replaces the hardcoded logging in system.py with configurable callbacks
+# This re        fad_metrics: ["fad_vggish_metric", "fad_pann_metric", "fad_clap_metric"]  # Restored CLAP supportlaces the hardcoded logging in system.py with configurable callbacks
 
 # Model configuration (same as before)
 model:

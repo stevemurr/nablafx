@@ -287,12 +287,12 @@ class FADMetric(torch.nn.Module):
             )
 
         # Validate model_name against supported models
-        supported_models = ["vggish", "pann"]
+        supported_models = ["vggish", "pann", "clap"]
         if model_name not in supported_models:
             raise ValueError(
                 f"Unsupported model_name: {model_name}. "
                 f"Currently supported models: {supported_models}. "
-                f"Note: CLAP and AFX-Rep require a newer version of frechet_audio_distance."
+                f"Note: AFX-Rep is not supported by the current package version."
             )
 
         self.model_name = model_name
@@ -321,7 +321,7 @@ class FADMetric(torch.nn.Module):
 
         # Filter kwargs to only include parameters supported by FrechetAudioDistance
         supported_kwargs = {}
-        fad_supported_params = ["use_pca", "use_activation", "audio_load_worker"]
+        fad_supported_params = ["use_pca", "use_activation", "audio_load_worker", "submodel_name", "enable_fusion"]
         for param in fad_supported_params:
             if param in self.kwargs:
                 supported_kwargs[param] = self.kwargs[param]
@@ -341,21 +341,22 @@ class FADMetric(torch.nn.Module):
                 ckpt_dir=self.ckpt_dir, model_name="pann", sample_rate=self.sample_rate, verbose=self.verbose, **supported_kwargs
             )
         elif self.model_name == "clap":
-            # Note: Current frechet_audio_distance package (v0.1.2) doesn't support CLAP
-            raise ValueError(
-                f"CLAP model is not supported by the installed frechet_audio_distance package (v0.1.2). "
-                f"Only 'vggish' and 'pann' are supported."
+            # CLAP is now supported with the updated package
+            clap_kwargs = supported_kwargs.copy()
+            # Ensure required CLAP parameters
+            if "submodel_name" not in clap_kwargs:
+                clap_kwargs["submodel_name"] = "630k-audioset"  # Default submodel
+            self.fad_model = self.FrechetAudioDistance(
+                ckpt_dir=self.ckpt_dir, model_name="clap", sample_rate=self.sample_rate, verbose=self.verbose, **clap_kwargs
             )
         elif self.model_name == "afx-rep":
-            # Note: Current frechet_audio_distance package (v0.1.2) doesn't support AFX-Rep
+            # Note: AFX-Rep is still not supported by the current package version
             raise ValueError(
-                f"AFX-Rep model is not supported by the installed frechet_audio_distance package (v0.1.2). "
-                f"Only 'vggish' and 'pann' are supported."
+                f"AFX-Rep model is not supported by the current frechet_audio_distance package. " f"Supported models: vggish, pann, clap."
             )
         else:
             raise ValueError(
-                f"Unsupported FAD model: {self.model_name}. "
-                f"Supported models: vggish, pann (CLAP and AFX-Rep require newer package version)"
+                f"Unsupported FAD model: {self.model_name}. " f"Supported models: vggish, pann, clap (AFX-Rep is not supported)"
             )
 
     def compute_fad_from_directories(self, target_dir: str, pred_dir: str) -> torch.Tensor:
@@ -453,19 +454,19 @@ class FADPANNMetric(FADMetric):
         super().__init__(model_name="pann", sample_rate=32000, ckpt_dir=ckpt_dir, **kwargs)
 
 
-# Note: CLAP and AFX-Rep metrics are temporarily disabled due to limitations
-# in the current frechet_audio_distance package (v0.1.2)
+# Note: AFX-Rep metric is disabled - not supported by current frechet_audio_distance package
 
-# @register_function("fad_clap_metric", differentiable=False, requires_no_grad=True)
-# class FADCLAPMetric(FADMetric):
-#     """CLAP-based Frechet Audio Distance metric."""
-#
-#     def __init__(self, ckpt_dir=None, submodel_name="630k-audioset", enable_fusion=False, **kwargs):
-#         super().__init__(
-#             model_name="clap", sample_rate=48000, ckpt_dir=ckpt_dir, submodel_name=submodel_name, enable_fusion=enable_fusion, **kwargs
-#         )
-#
-#
+
+@register_function("fad_clap_metric", differentiable=False, requires_no_grad=True)
+class FADCLAPMetric(FADMetric):
+    """CLAP-based Frechet Audio Distance metric."""
+
+    def __init__(self, ckpt_dir=None, submodel_name="630k-audioset", enable_fusion=False, **kwargs):
+        super().__init__(
+            model_name="clap", sample_rate=48000, ckpt_dir=ckpt_dir, submodel_name=submodel_name, enable_fusion=enable_fusion, **kwargs
+        )
+
+
 # @register_function("fad_afxrep_metric", differentiable=False, requires_no_grad=True)
 # class FADAFXRepMetric(FADMetric):
 #     """AFX-Rep-based Frechet Audio Distance metric."""

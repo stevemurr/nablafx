@@ -1,4 +1,4 @@
-# ====================================================================
+# ================================================================        fad_metrics: ["fad_vggish_metric", "fad_pann_metric", "fad_clap_metric"]  # Restored CLAP support===
 # MIGRATION EXAMPLE: Using Callbacks with Existing System Classes
 # ====================================================================
 

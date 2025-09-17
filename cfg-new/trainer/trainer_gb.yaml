@@ -1,6 +1,13 @@
 trainer:
   gradient_clip_val: 10.0
-  gradient_clip_algorithm: value
+  grad    # 🎯 NablAFx FAD Computation - Replaces built-in compute_and_log_fad()
+    - class_path: nablafx.callbacks.FADComputationCallback
+      init_args:
+        compute_on_train_end: true
+        compute_on_test_end: true
+        compute_every_n_epochs: 10
+        fad_metrics: ["fad_vggish_metric", "fad_pann_metric", "fad_clap_metric"]  # Restored CLAP support
+        checkpoint_dir: "checkpoints_fad"p_algorithm: value
   max_steps: 15000
 
   logger:
@@ -45,7 +52,7 @@ trainer:
         compute_on_train_end: true
         compute_on_test_end: true
         compute_every_n_epochs: 10
-        fad_metrics: ["fad_vggish_metric", "fad_pann_metric"] # Only supported models
+        fad_metrics: ["fad_vggish_metric", "fad_pann_metric", "fad_clap_metric"]  # Restored CLAP support
         checkpoint_dir: "checkpoints_fad"
 
     # 🎨 NablAFx Parameter Visualization - For gray-box models

@@ -62,7 +62,7 @@ def create_callback_based_trainer():
             compute_on_train_end=True,
             compute_on_test_end=True,
             compute_every_n_epochs=10,
-            fad_metrics=["fad_vggish_metric", "fad_pann_metric"],  # Only supported models
+            fad_metrics=["fad_vggish_metric", "fad_pann_metric", "fad_clap_metric"],  # Restored CLAP support
             checkpoint_dir="checkpoints_fad",
         ),
         # Parameter visualization - for gray-box models only

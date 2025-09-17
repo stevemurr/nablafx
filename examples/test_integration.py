@@ -107,7 +107,7 @@ def demo_callback_setup():
         FADComputationCallback(
             compute_on_train_end=True,
             compute_on_test_end=True,
-            fad_metrics=["fad_vggish_metric", "fad_pann_metric"],  # Only supported models
+            fad_metrics=["fad_vggish_metric", "fad_pann_metric", "fad_clap_metric"],  # Restored CLAP support
         ),
     ]
 

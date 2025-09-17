@@ -74,16 +74,14 @@ trainer:
               use_pca: false
           - name: "fad_pann_metric"
             alias: "pann"
-          # CLAP and AFX-Rep metrics disabled - not supported by current frechet_audio_distance package
-          # - name: "fad_clap_metric"
-          #   alias: "clap"
-          #   params:
-          #     sample_rate: 48000
-          #     submodel_name: "630k-audioset"
+          - name: "fad_clap_metric"
+            alias: "clap"
+            params:
+              submodel_name: "630k-audioset"
+              enable_fusion: false
+          # AFX-Rep metric disabled - not supported by current frechet_audio_distance package
           # - name: "fad_afxrep_metric"
           #   alias: "afx-rep"
-          #   params:
-          #     sample_rate: 48000
         checkpoint_dir: "checkpoints_fad"
         prefix: "fad"
 
