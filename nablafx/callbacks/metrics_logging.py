@@ -3,112 +3,84 @@ Metrics Logging Callback
 
 Handles computation and logging of various metrics during training.
 Extracted from system.py to provide modular, configurable metrics logging.
+Now uses the evaluation registry for flexible metric configuration.
 """
 
 import torch
-import torchmetrics as tm
-import auraloss
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Union
 import lightning as pl
 from lightning.pytorch.callbacks import Callback
+from nablafx.evaluation.registry import EvaluationRegistry
 
 
 class MetricsLoggingCallback(Callback):
     """
     Callback for computing and logging metrics during training.
 
-    This callback handles the computation and logging of various audio metrics
-    such as MAE, MSE, ESR, etc. during training and validation.
+    This callback leverages the evaluation registry to provide flexible,
+    configurable metrics computation and logging.
 
     Args:
-        metrics_config: Dictionary defining which metrics to compute.
-                       If None, uses default set of metrics.
+        metrics: List of metrics to compute. Each can be:
+                - str: metric name from registry (e.g., "snr_metric")
+                - dict: {"name": "metric_name", "alias": "custom_alias", "params": {...}}
         log_on_step: Whether to log metrics on each step (default: False)
         log_on_epoch: Whether to log metrics on each epoch (default: True)
         sync_dist: Whether to sync metrics across distributed processes (default: True)
+        prefix: Prefix for metric names in logs (default: "metric")
     """
 
     def __init__(
         self,
-        metrics_config: Optional[Dict[str, Any]] = None,
+        metrics: Optional[List[Union[str, Dict[str, Any]]]] = None,
         log_on_step: bool = False,
         log_on_epoch: bool = True,
         sync_dist: bool = True,
+        prefix: str = "metric",
     ):
         super().__init__()
         self.log_on_step = log_on_step
         self.log_on_epoch = log_on_epoch
         self.sync_dist = sync_dist
+        self.prefix = prefix
 
-        # Initialize metrics
-        self.metrics = self._create_metrics(metrics_config)
+        # Initialize metrics using registry
+        self.metrics = self._create_metrics_from_registry(metrics or self._get_default_metrics())
 
-    def _create_metrics(self, config: Optional[Dict[str, Any]] = None) -> Dict[str, torch.nn.Module]:
-        """Create metrics based on configuration."""
-        if config is None:
-            # Default metrics (matching original system.py)
-            return {
-                "mae": tm.MeanAbsoluteError(),
-                "mape": tm.MeanAbsolutePercentageError(),
-                "mse": tm.MeanSquaredError(),
-                "cossim": tm.CosineSimilarity(),
-                "logcosh": auraloss.time.LogCoshLoss(),
-                "esr": auraloss.time.ESRLoss(),
-                "dcloss": auraloss.time.DCLoss(),
-            }
+    def _get_default_metrics(self) -> List[str]:
+        """Get default metrics configuration."""
+        return ["snr_metric", "thd_metric", "zero_crossing_rate_metric"]
 
-        # Create metrics from config
+    def _create_metrics_from_registry(self, metrics_config: List[Union[str, Dict[str, Any]]]) -> Dict[str, Any]:
+        """Create metrics using the evaluation registry."""
         metrics = {}
-        for name, metric_config in config.items():
-            if isinstance(metric_config, str):
+
+        for metric_spec in metrics_config:
+            if isinstance(metric_spec, str):
                 # Simple string reference
-                metrics[name] = self._get_metric_by_name(metric_config)
-            elif isinstance(metric_config, dict):
-                # Dictionary config with class_path and init_args
-                metrics[name] = self._create_metric_from_config(metric_config)
+                name = metric_spec
+                alias = name.replace("_metric", "").replace("_loss", "")
+                params = {}
+            elif isinstance(metric_spec, dict):
+                # Full configuration
+                name = metric_spec["name"]
+                alias = metric_spec.get("alias", name.replace("_metric", "").replace("_loss", ""))
+                params = metric_spec.get("params", {})
+            else:
+                raise ValueError(f"Invalid metric specification: {metric_spec}")
+
+            # Validate it's a metric (not differentiable, requires no_grad)
+            if name not in EvaluationRegistry.list_functions():
+                raise ValueError(f"Unknown metric: {name}")
+
+            if EvaluationRegistry.is_differentiable(name):
+                print(f"Warning: {name} is differentiable - typically used as loss, not metric")
+
+            # Create metric function
+            metric_fn = EvaluationRegistry.get_function(name, **params)
+            metrics[alias] = {"function": metric_fn, "requires_no_grad": EvaluationRegistry.requires_no_grad(name)}
 
         return metrics
-
-    def _get_metric_by_name(self, name: str) -> torch.nn.Module:
-        """Get metric by name string."""
-        metric_registry = {
-            "mae": tm.MeanAbsoluteError,
-            "mape": tm.MeanAbsolutePercentageError,
-            "mse": tm.MeanSquaredError,
-            "cossim": tm.CosineSimilarity,
-            "logcosh": auraloss.time.LogCoshLoss,
-            "esr": auraloss.time.ESRLoss,
-            "dcloss": auraloss.time.DCLoss,
-        }
-
-        if name not in metric_registry:
-            raise ValueError(f"Unknown metric: {name}")
-
-        return metric_registry[name]()
-
-    def _create_metric_from_config(self, config: Dict[str, Any]) -> torch.nn.Module:
-        """Create metric from configuration dictionary."""
-        # This is a simplified version - in practice you'd want more robust
-        # dynamic class loading similar to the loss system
-        class_path = config.get("class_path", "")
-        init_args = config.get("init_args", {})
-
-        # For now, handle common cases
-        if "torchmetrics" in class_path:
-            # Handle torchmetrics
-            module_name = class_path.split(".")[-1]
-            if hasattr(tm, module_name):
-                return getattr(tm, module_name)(**init_args)
-        elif "auraloss" in class_path:
-            # Handle auraloss metrics
-            parts = class_path.split(".")
-            if len(parts) >= 3:  # e.g., auraloss.time.ESRLoss
-                domain = parts[1]  # time or freq
-                metric_name = parts[2]
-                domain_module = getattr(auraloss, domain)
-                return getattr(domain_module, metric_name)(**init_args)
-
-        raise ValueError(f"Cannot create metric from config: {config}")
 
     def on_train_batch_end(
         self,
@@ -170,11 +142,11 @@ class MetricsLoggingCallback(Callback):
         with torch.no_grad():
             pred = pl_module(input_audio, controls, train=(mode == "train"))
 
-        # Compute metrics
-        for name, metric in self.metrics.items():
+        # Compute metrics using registry
+        for alias, metric_info in self.metrics.items():
             try:
-                # Move metric to correct device
-                metric = metric.to(pl_module.device)
+                metric_fn = metric_info["function"]
+                requires_no_grad = metric_info["requires_no_grad"]
 
                 # Prepare tensors
                 pred_for_metric = pred.clone()
@@ -185,17 +157,26 @@ class MetricsLoggingCallback(Callback):
                     pred_for_metric = pred_for_metric.squeeze(1)
                     target_for_metric = target_for_metric.squeeze(1)
 
-                # Compute metric
-                metric_value = metric(pred_for_metric, target_for_metric)
+                # Compute metric with appropriate gradient context
+                if requires_no_grad:
+                    with torch.no_grad():
+                        metric_value = metric_fn(pred_for_metric, target_for_metric)
+                else:
+                    metric_value = metric_fn(pred_for_metric, target_for_metric)
 
                 # Clean up tensors
                 pred_for_metric = pred_for_metric.detach().cpu()
                 target_for_metric = target_for_metric.detach().cpu()
-                metric_value = metric_value.detach().cpu()
+
+                # Ensure metric value is a scalar tensor
+                if isinstance(metric_value, tuple):
+                    metric_value = metric_value[0]  # Take first element if tuple
+                if hasattr(metric_value, "detach"):
+                    metric_value = metric_value.detach().cpu()
 
                 # Log metric
                 pl_module.log(
-                    f"metrics/{mode}/{name}",
+                    f"{self.prefix}/{mode}/{alias}",
                     metric_value,
                     on_step=self.log_on_step,
                     on_epoch=self.log_on_epoch,
@@ -204,13 +185,13 @@ class MetricsLoggingCallback(Callback):
                     sync_dist=self.sync_dist,
                 )
 
-                # Reset metric state if possible
-                if hasattr(metric, "reset"):
-                    metric.reset()
+                # Reset metric state if possible (for stateful metrics)
+                if hasattr(metric_fn, "reset"):
+                    metric_fn.reset()
 
             except Exception as e:
                 # Log error but don't crash training
-                print(f"Warning: Failed to compute metric {name}: {e}")
+                print(f"Warning: Failed to compute metric {alias}: {e}")
                 continue
 
         # Cleanup

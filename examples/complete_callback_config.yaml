@@ -104,7 +104,7 @@ trainer:
         compute_on_train_end: true # Compute FAD when training ends
         compute_on_test_end: true # Compute FAD when testing ends
         compute_every_n_epochs: 10 # Compute FAD every 10 epochs during val
-        models: ["vggish", "pann", "clap", "afx-rep"] # All FAD models
+        fad_metrics: ["fad_vggish_metric", "fad_pann_metric"] # Only supported models
         checkpoint_dir: "checkpoints_fad"
         # Optional: customize model settings
         # model_configs:

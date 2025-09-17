@@ -74,7 +74,7 @@ trainer:
         compute_on_train_end: true
         compute_on_test_end: true
         compute_every_n_epochs: 5 # Compute FAD every 5 epochs
-        models: ["vggish", "pann", "clap", "afx-rep"]
+        fad_metrics: ["fad_vggish_metric", "fad_pann_metric"] # Only supported models
         checkpoint_dir: "checkpoints_fad"
         # Optional: customize model configs
         # model_configs:
