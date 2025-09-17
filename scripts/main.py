@@ -36,7 +36,7 @@ def cli_main():
         },
         save_config_kwargs={
             # "config_filename": "config.yaml",
-            "overwrite": False,
+            "overwrite": True,
         },
     )
 
