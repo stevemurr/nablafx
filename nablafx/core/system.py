@@ -58,6 +58,9 @@ class BaseSystem(pl.LightningModule):
 
         # metrics (only used if not using callbacks)
         if not self.use_callbacks:
+            # WARNING: These are legacy hardcoded metrics for backward compatibility.
+            # For new projects, use MetricsLoggingCallback with the evaluation registry
+            # which provides better configurability and supports more metrics.
             self.metrics = {
                 "mae": tm.MeanAbsoluteError(),
                 "mape": tm.MeanAbsolutePercentageError(),
@@ -234,7 +237,13 @@ class BaseSystem(pl.LightningModule):
         return tot_loss
 
     def compute_and_log_metrics(self, pred, target, mode):
-        """Compute and log metrics. No-op if using callbacks."""
+        """Compute and log metrics. No-op if using callbacks.
+
+        WARNING: This is legacy code for backward compatibility.
+        For new projects, use MetricsLoggingCallback with the evaluation registry
+        which provides better configurability and supports more metrics including
+        audio-specific ones like SNR, THD, zero-crossing rate, etc.
+        """
         if self.use_callbacks:
             return  # Metrics handled by MetricsLoggingCallback
 
@@ -263,7 +272,12 @@ class BaseSystem(pl.LightningModule):
         pred, target, metric_value = None, None, None
 
     def log_audio(self, batch_idx, input, target, pred, mode):
-        """Log audio samples. No-op if using callbacks."""
+        """Log audio samples. No-op if using callbacks.
+
+        WARNING: This is legacy code for backward compatibility.
+        For new projects, use AudioLoggingCallback which provides better
+        configurability and more efficient audio logging.
+        """
         if self.use_callbacks:
             return  # Audio logging handled by AudioLoggingCallback
 
@@ -328,7 +342,12 @@ class BaseSystem(pl.LightningModule):
         self.logger.experiment.log({f"response/freq+phase": [wandb.Image(plot, caption=f"")]}, step=self.trainer.global_step)
 
     def compute_and_log_fad(self, mode):
-        """Compute and log FAD scores. No-op if using callbacks."""
+        """Compute and log FAD scores. No-op if using callbacks.
+
+        WARNING: This is legacy code for backward compatibility.
+        For new projects, use FADComputationCallback with the evaluation registry
+        which provides better configurability and supports the latest models.
+        """
         if self.use_callbacks:
             return  # FAD computation handled by FADComputationCallback
 
@@ -382,29 +401,30 @@ class BaseSystem(pl.LightningModule):
             pred_dir,
         )
 
-        fad_afxrep = FrechetAudioDistance(
-            os.path.join(ckpt_dir, "afx-rep"),
-            model_name="afx-rep",
-            sample_rate=48000,
-            verbose=False,
-        )
-
-        fad_score_afxrep = fad_afxrep.score(
-            target_dir,
-            pred_dir,
-        )
+        # AFX-Rep is not supported by the current frechet_audio_distance package
+        # fad_afxrep = FrechetAudioDistance(
+        #     os.path.join(ckpt_dir, "afx-rep"),
+        #     model_name="afx-rep",
+        #     sample_rate=48000,
+        #     verbose=False,
+        # )
+        #
+        # fad_score_afxrep = fad_afxrep.score(
+        #     target_dir,
+        #     pred_dir,
+        # )
 
         print(f"\nFAD score (vggish): {fad_score_vggish}")
         print(f"FAD score (pann): {fad_score_pann}")
         print(f"FAD score (clap): {fad_score_clap}")
-        print(f"FAD score (afx-rep): {fad_score_afxrep}")
+        # print(f"FAD score (afx-rep): {fad_score_afxrep}")
 
         self.logger.experiment.log(
             {
                 f"metrics/{mode}/fad-vggish": fad_score_vggish,
                 f"metrics/{mode}/fad-pann": fad_score_pann,
                 f"metrics/{mode}/fad-clap": fad_score_clap,
-                f"metrics/{mode}/fad-afxrep": fad_score_afxrep,
+                # f"metrics/{mode}/fad-afxrep": fad_score_afxrep,
             },
             step=self.trainer.global_step,
         )
@@ -786,7 +806,12 @@ class GreyBoxSystem(BaseSystem):
                 )
 
     def log_response_and_params_at_each_block(self, input, controls, mode="val"):
-        """Log response and parameters at each block. No-op if using callbacks."""
+        """Log response and parameters at each block. No-op if using callbacks.
+
+        WARNING: This is legacy code for backward compatibility.
+        For new projects, use ParameterVisualizationCallback which provides better
+        configurability and more efficient parameter visualization.
+        """
         if self.use_callbacks:
             return  # Parameter visualization handled by ParameterVisualizationCallback
 
