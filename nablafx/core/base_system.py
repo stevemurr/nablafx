@@ -12,6 +12,7 @@ import wandb
 from typing import List, Optional
 from nablafx.plotting import plot_frequency_response_steps
 from nablafx.loss import TimeAndFrequencyDomainLoss, WeightedMultiLoss
+from nablafx.evaluation.flexible_loss import FlexibleLoss
 from frechet_audio_distance import FrechetAudioDistance
 
 module_path = os.path.abspath(os.path.join(".."))
@@ -125,8 +126,8 @@ class BaseSystem(pl.LightningModule):
         losses = self.loss(pred, target)
 
         # Handle different loss function formats
-        if isinstance(self.loss, WeightedMultiLoss):
-            # New WeightedMultiLoss format
+        if isinstance(self.loss, (WeightedMultiLoss, FlexibleLoss)):
+            # WeightedMultiLoss or FlexibleLoss format
             if isinstance(losses, tuple):
                 # Multiple losses: (loss1, loss2, ..., total_loss)
                 individual_losses = losses[:-1]
@@ -138,7 +139,13 @@ class BaseSystem(pl.LightningModule):
 
             # Compute scaled losses for logging (unweighted values)
             scaled_losses = []
-            loss_names = self.loss.get_loss_names()
+
+            # Use aliases if available (FlexibleLoss), otherwise use names
+            if hasattr(self.loss, "get_loss_aliases"):
+                loss_names = self.loss.get_loss_aliases()
+            else:
+                loss_names = self.loss.get_loss_names()
+
             weights = self.loss.get_weights()
 
             for loss_val, weight in zip(individual_losses, weights):
