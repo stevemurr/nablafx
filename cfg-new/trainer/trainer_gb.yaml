@@ -1,13 +1,6 @@
 trainer:
   gradient_clip_val: 10.0
-  grad    # 🎯 NablAFx FAD Computation - Replaces built-in compute_and_log_fad()
-    - class_path: nablafx.callbacks.FADComputationCallback
-      init_args:
-        compute_on_train_end: true
-        compute_on_test_end: true
-        compute_every_n_epochs: 10
-        fad_metrics: ["fad_vggish_metric", "fad_pann_metric", "fad_clap_metric"]  # Restored CLAP support
-        checkpoint_dir: "checkpoints_fad"p_algorithm: value
+  gradient_clip_algorithm: value
   max_steps: 15000
 
   logger:
@@ -31,29 +24,66 @@ trainer:
         log_test_batches: 10
         log_input_target_once: true
 
-    # 📊 NablAFx Metrics Logging - Replaces built-in compute_and_log_metrics()
+    # 📊 NablAFx Metrics Logging - Registry-based configurable metrics
     - class_path: nablafx.callbacks.MetricsLoggingCallback
       init_args:
+        metrics:
+          # Audio-specific metrics for guitar/amp modeling
+          - name: "snr_metric"
+            alias: "snr"
+          - name: "thd_metric"
+            alias: "thd"
+            params:
+              eps: 1e-8
+          - name: "zero_crossing_rate_metric"
+            alias: "zcr"
+          # You can also use differentiable functions as metrics (logged but not optimized)
+          - name: "edc_loss"
+            alias: "edc_metric"
+            params:
+              remove_dc: true
+              min_db: -80
+          - name: "spectral_centroid_loss"
+            alias: "brightness"
+            params:
+              n_fft: 1024
         log_on_step: false
         log_on_epoch: true
         sync_dist: true
+        prefix: "metric"
 
     # 🎛️ NablAFx Frequency Response - Replaces built-in log_frequency_response()
     - class_path: nablafx.callbacks.FrequencyResponseCallback
       init_args:
         log_on_train_start: true
-        log_on_train_end: true
+        log_on_train_end: false
         log_on_test_end: true
         log_every_n_epochs: null
 
-    # 🎯 NablAFx FAD Computation - Replaces built-in compute_and_log_fad()
+    # 🎯 NablAFx FAD Computation - Registry-based configurable FAD models
     - class_path: nablafx.callbacks.FADComputationCallback
       init_args:
         compute_on_train_end: true
         compute_on_test_end: true
         compute_every_n_epochs: 10
-        fad_metrics: ["fad_vggish_metric", "fad_pann_metric", "fad_clap_metric"]  # Restored CLAP support
+        fad_metrics:
+          # Specific FAD models for comprehensive evaluation
+          - name: "fad_vggish_metric"
+            alias: "vggish"
+            params:
+              use_pca: false
+          - name: "fad_pann_metric"
+            alias: "pann"
+          - name: "fad_clap_metric"
+            alias: "clap"
+            params:
+              submodel_name: "630k-audioset"
+              enable_fusion: false
+          # AFX-Rep metric disabled - not supported by current frechet_audio_distance package
+          # - name: "fad_afxrep_metric"
+          #   alias: "afx-rep"
         checkpoint_dir: "checkpoints_fad"
+        prefix: "fad"
 
     # 🎨 NablAFx Parameter Visualization - For gray-box models
     - class_path: nablafx.callbacks.ParameterVisualizationCallback
