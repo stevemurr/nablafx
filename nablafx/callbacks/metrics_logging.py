@@ -152,10 +152,9 @@ class MetricsLoggingCallback(Callback):
                 pred_for_metric = pred.clone()
                 target_for_metric = target.clone()
 
-                # Handle tensor dimensions (some metrics expect 2D)
-                if pred_for_metric.dim() == 3:
-                    pred_for_metric = pred_for_metric.squeeze(1)
-                    target_for_metric = target_for_metric.squeeze(1)
+                # Ensure metric function is on the same device as the tensors
+                if hasattr(metric_fn, "to"):
+                    metric_fn = metric_fn.to(pred_for_metric.device)
 
                 # Compute metric with appropriate gradient context
                 if requires_no_grad:

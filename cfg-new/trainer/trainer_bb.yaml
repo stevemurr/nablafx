@@ -29,24 +29,50 @@ trainer:
       init_args:
         metrics:
           # Audio-specific metrics for guitar/amp modeling
+          - name: "l1_loss"
+            alias: "l1"
+          - name: "mape_loss"
+            alias: "mape"
+          - name: "mse_loss"
+            alias: "mse"
+          - name: "smooth_l1_loss"
+            alias: "smooth_l1"
+          - name: "huber_loss"
+            alias: "huber"
+          - name: "esr_loss"
+            alias: "esr"
+          - name: "dc_loss"
+            alias: "dc"
+          - name: "si_sdr_loss"
+            alias: "si_sdr"
           - name: "snr_metric"
             alias: "snr"
           - name: "thd_metric"
             alias: "thd"
+          - name: "cosine_similarity_loss"
+            alias: "cosine_similarity"
+          - name: "log_cosh_loss"
+            alias: "log_cosh"
+          - name: "stft_loss"
+            alias: "stft"
+          - name: "mrstft_loss"
+            alias: "mrstft"
+          - name: "melstft_loss"
+            alias: "melstft"
             params:
-              eps: 1e-8
-          - name: "zero_crossing_rate_metric"
-            alias: "zcr"
-          # You can also use differentiable functions as metrics (logged but not optimized)
+              sample_rate: 48000
+          - name: "random_stft_loss"
+            alias: "random_stft"
           - name: "edc_loss"
-            alias: "edc_metric"
-            params:
-              remove_dc: true
-              min_db: -80
+            alias: "edc"
           - name: "spectral_centroid_loss"
-            alias: "brightness"
-            params:
-              n_fft: 1024
+            alias: "spectral_centroid"
+          - name: "spectral_rolloff_loss"
+            alias: "spectral_rolloff"
+          - name: "a_weighting_loss"
+            alias: "a_weighting"
+          - name: "zero_crossing_rate_metric"
+            alias: "zero_crossing_rate"
         log_on_step: false
         log_on_epoch: true
         sync_dist: true
@@ -63,9 +89,9 @@ trainer:
     # 🎯 NablAFx FAD Computation - Registry-based configurable FAD models
     - class_path: nablafx.callbacks.FADComputationCallback
       init_args:
-        compute_on_train_end: true
+        compute_on_train_end: false
         compute_on_test_end: true
-        compute_every_n_epochs: 10
+        compute_every_n_epochs: null
         fad_metrics:
           # Specific FAD models for comprehensive evaluation
           - name: "fad_vggish_metric"

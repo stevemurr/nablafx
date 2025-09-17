@@ -143,6 +143,10 @@ class MAPELoss(torch.nn.Module):
         self.mape = tm.MeanAbsolutePercentageError()
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        # Ensure metric is on the same device as input tensors
+        if hasattr(self.mape, "to"):
+            self.mape = self.mape.to(pred.device)
+
         # Handle batch dimensions - torchmetrics expects [N, ...] format
         original_shape = pred.shape
         if len(original_shape) > 2:
@@ -169,6 +173,10 @@ class CosineSimilarityLoss(torch.nn.Module):
         self.reduction = reduction
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        # Ensure metric is on the same device as input tensors
+        if hasattr(self.cos_sim, "to"):
+            self.cos_sim = self.cos_sim.to(pred.device)
+
         # Handle batch dimensions - torchmetrics expects [N, ...] format
         original_shape = pred.shape
         if len(original_shape) > 2:
