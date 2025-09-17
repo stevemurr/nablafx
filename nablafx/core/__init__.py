@@ -9,7 +9,11 @@ This module contains:
 
 from .interfaces import Processor, Controller
 from .models import BlackBoxModel, GreyBoxModel
-from .system import BaseSystem, BlackBoxSystem, BlackBoxSystemWithTBPTT, GreyBoxSystem, GreyBoxSystemWithTBPTT
+
+# Import systems from their new modular files
+from .base_system import BaseSystem
+from .blackbox_system import BlackBoxSystem, BlackBoxSystemWithTBPTT
+from .greybox_system import GreyBoxSystem, GreyBoxSystemWithTBPTT
 
 __all__ = [
     # Interfaces
