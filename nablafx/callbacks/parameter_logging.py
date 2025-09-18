@@ -10,7 +10,7 @@ import wandb
 from typing import Any, Optional
 import lightning as pl
 from lightning.pytorch.callbacks import Callback
-from nablafx.plotting import plot_gb_model
+from nablafx.utils.plotting import plot_gb_model
 
 
 class ParameterLoggingCallback(Callback):

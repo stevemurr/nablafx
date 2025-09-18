@@ -2,7 +2,7 @@ import torch
 import wandb
 from .base_system import BaseSystem
 from .models import GreyBoxModel
-from nablafx.plotting import plot_gb_model
+from nablafx.utils.plotting import plot_gb_model
 
 
 class GreyBoxSystem(BaseSystem):

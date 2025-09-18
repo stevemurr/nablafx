@@ -10,7 +10,7 @@ import wandb
 from typing import Any, Optional
 import lightning as pl
 from lightning.pytorch.callbacks import Callback
-from nablafx.plotting import plot_frequency_response_steps
+from nablafx.utils.plotting import plot_frequency_response_steps
 
 
 class FrequencyResponseCallback(Callback):

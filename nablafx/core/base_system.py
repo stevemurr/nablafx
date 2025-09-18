@@ -10,7 +10,7 @@ import torchmetrics as tm
 import wandb
 
 from typing import List, Optional
-from nablafx.plotting import plot_frequency_response_steps
+from nablafx.utils.plotting import plot_frequency_response_steps
 from nablafx.loss import TimeAndFrequencyDomainLoss, WeightedMultiLoss
 from nablafx.evaluation.flexible_loss import FlexibleLoss
 from frechet_audio_distance import FrechetAudioDistance
