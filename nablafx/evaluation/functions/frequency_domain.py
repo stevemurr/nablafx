@@ -24,7 +24,7 @@ class STFTLoss(torch.nn.Module):
             pred = pred.unsqueeze(1)  # Add channel dimension if missing
         if target.dim() == 2:
             target = target.unsqueeze(1)
-            
+
         return self.loss_fn(pred, target)
 
 
@@ -42,7 +42,7 @@ class MultiResolutionSTFTLoss(torch.nn.Module):
             pred = pred.unsqueeze(1)  # Add channel dimension if missing
         if target.dim() == 2:
             target = target.unsqueeze(1)
-            
+
         return self.loss_fn(pred, target)
 
 
@@ -60,7 +60,7 @@ class MelSTFTLoss(torch.nn.Module):
             pred = pred.unsqueeze(1)  # Add channel dimension if missing
         if target.dim() == 2:
             target = target.unsqueeze(1)
-            
+
         return self.loss_fn(pred, target)
 
 
@@ -78,5 +78,5 @@ class RandomResolutionSTFTLoss(torch.nn.Module):
             pred = pred.unsqueeze(1)  # Add channel dimension if missing
         if target.dim() == 2:
             target = target.unsqueeze(1)
-            
+
         return self.loss_fn(pred, target)
