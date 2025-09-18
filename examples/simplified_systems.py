@@ -39,7 +39,7 @@ class BaseSystemWithCallbacks(pl.LightningModule):
         losses = self.loss(pred, target)
 
         # Handle different loss function formats
-        if hasattr(self.loss, "get_loss_names"):  # WeightedMultiLoss
+        if hasattr(self.loss, "get_loss_names"):  # FlexibleLoss
             if isinstance(losses, tuple):
                 return losses[-1]  # Return total loss
             else:

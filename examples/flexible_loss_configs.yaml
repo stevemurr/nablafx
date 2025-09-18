@@ -1,5 +1,5 @@
 # Updated config files for the new FlexibleLoss system
-# This file shows how to migrate from WeightedMultiLoss to FlexibleLoss
+# This file shows examples of FlexibleLoss configurations
 
 # Example 1: Simple L1 + Multi-Resolution STFT (equivalent to old config)
 model:

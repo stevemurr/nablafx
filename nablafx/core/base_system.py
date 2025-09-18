@@ -11,7 +11,6 @@ import wandb
 
 from typing import List, Optional
 from nablafx.utils.plotting import plot_frequency_response_steps
-from nablafx.loss import TimeAndFrequencyDomainLoss, WeightedMultiLoss
 from nablafx.evaluation.flexible_loss import FlexibleLoss
 from frechet_audio_distance import FrechetAudioDistance
 
@@ -125,9 +124,8 @@ class BaseSystem(pl.LightningModule):
 
         losses = self.loss(pred, target)
 
-        # Handle different loss function formats
-        if isinstance(self.loss, (WeightedMultiLoss, FlexibleLoss)):
-            # WeightedMultiLoss or FlexibleLoss format
+        # Handle FlexibleLoss format
+        if isinstance(self.loss, FlexibleLoss):
             if isinstance(losses, tuple):
                 # Multiple losses: (loss1, loss2, ..., total_loss)
                 individual_losses = losses[:-1]
@@ -140,12 +138,8 @@ class BaseSystem(pl.LightningModule):
             # Compute scaled losses for logging (unweighted values)
             scaled_losses = []
 
-            # Use aliases if available (FlexibleLoss), otherwise use names
-            if hasattr(self.loss, "get_loss_aliases"):
-                loss_names = self.loss.get_loss_aliases()
-            else:
-                loss_names = self.loss.get_loss_names()
-
+            # Use aliases for loss names
+            loss_names = self.loss.get_loss_aliases()
             weights = self.loss.get_weights()
 
             for loss_val, weight in zip(individual_losses, weights):
@@ -155,22 +149,6 @@ class BaseSystem(pl.LightningModule):
                     scaled_losses.append(loss_val)
 
             tot_loss_scaled = sum(scaled_losses)
-
-        elif isinstance(self.loss, TimeAndFrequencyDomainLoss):
-            # Original TimeAndFrequencyDomainLoss format (backward compatibility)
-            td_loss, fd_loss = losses[0], losses[1]
-            tot_loss = sum(losses)
-            individual_losses = [td_loss, fd_loss]
-            loss_names = ["l1", "mrstft"]
-
-            td_loss_scaled = 0.0
-            fd_loss_scaled = 0.0
-            if self.loss.time_domain_weight > 0:
-                td_loss_scaled = losses[0] / self.loss.time_domain_weight
-            if self.loss.frequency_domain_weight > 0:
-                fd_loss_scaled = losses[1] / self.loss.frequency_domain_weight
-            tot_loss_scaled = td_loss_scaled + fd_loss_scaled
-            scaled_losses = [td_loss_scaled, fd_loss_scaled]
 
         else:
             # Simple loss function (single value)

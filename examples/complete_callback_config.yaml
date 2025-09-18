@@ -20,27 +20,24 @@ system:
     use_callbacks: true # 🆕 Enable callback-based logging
     # log_media_every_n_steps: ignored when use_callbacks=true
 
-# Loss Configuration (using WeightedMultiLoss system)
+# Loss Configuration (using FlexibleLoss system)
 loss:
-  class_path: nablafx.loss.WeightedMultiLoss
+  class_path: nablafx.evaluation.FlexibleLoss
   init_args:
     losses:
-      - loss:
-          class_path: auraloss.time.ESRLoss
+      - name: esr_loss
         weight: 0.3
-        name: "esr"
-      - loss:
-          class_path: auraloss.freq.MultiResolutionSTFTLoss
-          init_args:
-            fft_sizes: [1024, 2048, 512]
-            hop_sizes: [256, 512, 128]
-            win_lengths: [1024, 2048, 512]
+        alias: esr
+      - name: mrstft_loss
         weight: 0.4
-        name: "multi_stft"
-      - loss:
-          class_path: torch.nn.L1Loss
+        alias: multi_stft
+        params:
+          fft_sizes: [1024, 2048, 512]
+          hop_sizes: [256, 512, 128]
+          win_lengths: [1024, 2048, 512]
+      - name: l1_loss
         weight: 0.3
-        name: "l1"
+        alias: l1
 
 # Model Configuration (same as before)
 model:

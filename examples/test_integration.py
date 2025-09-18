@@ -10,7 +10,7 @@ import lightning as pl
 from lightning.pytorch.loggers import WandbLogger
 
 # Import system classes
-from nablafx.system import BlackBoxSystem, BaseSystem
+from nablafx.core import BlackBoxSystem, BaseSystem
 
 # Import callbacks
 from nablafx.callbacks import (
@@ -21,7 +21,7 @@ from nablafx.callbacks import (
 )
 
 # Import loss and model (you'll need to adjust these imports)
-from nablafx.loss import WeightedMultiLoss
+from nablafx.evaluation import FlexibleLoss
 
 
 def test_callback_integration():
@@ -30,8 +30,8 @@ def test_callback_integration():
     print("🧪 Testing Callback Integration")
     print("=" * 50)
 
-    # Create a simple loss function
-    loss = WeightedMultiLoss(losses=[{"loss": torch.nn.L1Loss(), "weight": 1.0, "name": "l1"}])
+    # Create a simple loss function using FlexibleLoss
+    loss = FlexibleLoss(losses=[{"name": "l1_loss", "weight": 1.0, "alias": "l1"}])
 
     # Test 1: Traditional system (use_callbacks=False)
     print("\n1️⃣ Testing traditional system (use_callbacks=False)")

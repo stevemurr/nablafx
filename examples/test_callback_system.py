@@ -22,7 +22,7 @@ from nablafx.callbacks import (
 # For this example, we'll use the existing system but show the callback setup
 from nablafx.system import BlackBoxSystem
 from nablafx.models import BlackBoxModel
-from nablafx.loss import WeightedMultiLoss
+from nablafx.evaluation.flexible_loss import FlexibleLoss
 from nablafx.data import DataModule  # Assuming this exists
 
 
@@ -103,8 +103,8 @@ def create_callback_based_trainer():
 def create_system_and_data():
     """Create a system and data module for testing."""
 
-    # Create a simple loss function
-    loss = WeightedMultiLoss(
+    # Create a simple loss function using FlexibleLoss
+    loss = FlexibleLoss(
         losses=[{"loss": torch.nn.L1Loss(), "weight": 0.5, "name": "l1"}, {"loss": torch.nn.MSELoss(), "weight": 0.5, "name": "mse"}]
     )
 
@@ -209,7 +209,7 @@ system:
 
 # Loss config
 loss:
-  class_path: nablafx.loss.WeightedMultiLoss
+  class_path: nablafx.evaluation.flexible_loss.FlexibleLoss
   init_args:
     losses:
       - loss:
