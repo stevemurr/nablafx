@@ -1,7 +1,7 @@
 import torch
 
 from nablafx.dist import Distortion
-from nablafx.dsp import Gain, TanhNonlinearity, ParametricEQ, StaticMLPNonlinearity
+from nablafx.processors import Gain, TanhNonlinearity, ParametricEQ, StaticMLPNonlinearity
 
 sample_rate = 48000
 
