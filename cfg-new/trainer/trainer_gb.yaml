@@ -4,7 +4,6 @@ trainer:
   max_steps: 15000
 
   logger:
-    # class_path: pytorch_lightning.loggers.WandbLogger
     class_path: lightning.pytorch.loggers.wandb.WandbLogger
     init_args:
       entity: mcomunita
@@ -15,87 +14,117 @@ trainer:
       tags: ["Ampeg-OptoComp", "GB-COMP"]
 
   callbacks:
-    # 🎵 NablAFx Audio Logging - Replaces built-in log_audio()
+    # Audio Logging
     - class_path: nablafx.callbacks.AudioLoggingCallback
       init_args:
-        log_every_n_steps: 3000 # Matches typical log_media_every_n_steps
+        log_every_n_steps: 3000
         sample_rate: 48000
         max_samples_per_batch: 3
         log_test_batches: 10
         log_input_target_once: true
 
-    # 📊 NablAFx Metrics Logging - Registry-based configurable metrics
+    # Metrics Logging
     - class_path: nablafx.callbacks.MetricsLoggingCallback
       init_args:
         metrics:
-          # Audio-specific metrics for guitar/amp modeling
+          - name: "l1_loss"
+            alias: "l1"
+          - name: "mape_loss"
+            alias: "mape"
+          - name: "mse_loss"
+            alias: "mse"
+          - name: "smooth_l1_loss"
+            alias: "smooth_l1"
+          - name: "huber_loss"
+            alias: "huber"
+          - name: "esr_loss"
+            alias: "esr"
+          - name: "dc_loss"
+            alias: "dc"
+          - name: "si_sdr_loss"
+            alias: "si_sdr"
           - name: "snr_metric"
             alias: "snr"
           - name: "thd_metric"
             alias: "thd"
+          - name: "cosine_similarity_loss"
+            alias: "cosine_similarity"
+          - name: "log_cosh_loss"
+            alias: "log_cosh"
+          - name: "stft_loss"
+            alias: "stft"
+          - name: "mrstft_loss"
+            alias: "mrstft"
+          - name: "melstft_loss"
+            alias: "melstft"
             params:
-              eps: 1e-8
-          - name: "zero_crossing_rate_metric"
-            alias: "zcr"
-          # You can also use differentiable functions as metrics (logged but not optimized)
+              sample_rate: 48000
+          - name: "random_stft_loss"
+            alias: "random_stft"
           - name: "edc_loss"
-            alias: "edc_metric"
-            params:
-              remove_dc: true
-              min_db: -80
+            alias: "edc"
           - name: "spectral_centroid_loss"
-            alias: "brightness"
-            params:
-              n_fft: 1024
+            alias: "spectral_centroid"
+          - name: "spectral_rolloff_loss"
+            alias: "spectral_rolloff"
+          - name: "a_weighting_loss"
+            alias: "a_weighting"
+          - name: "zero_crossing_rate_metric"
+            alias: "zero_crossing_rate"
         log_on_step: false
         log_on_epoch: true
         sync_dist: true
         prefix: "metric"
 
-    # 🎛️ NablAFx Frequency Response - Replaces built-in log_frequency_response()
-    - class_path: nablafx.callbacks.FrequencyResponseCallback
-      init_args:
-        log_on_train_start: true
-        log_on_train_end: false
-        log_on_test_end: true
-        log_every_n_epochs: null
+    # Frequency Response
+    # - class_path: nablafx.callbacks.FrequencyResponseCallback
+    #   init_args:
+    #     log_on_train_start: true
+    #     log_on_train_end: false
+    #     log_on_test_end: true
+    #     log_every_n_epochs: null
 
-    # 🎯 NablAFx FAD Computation - Registry-based configurable FAD models
-    - class_path: nablafx.callbacks.FADComputationCallback
-      init_args:
-        compute_on_train_end: true
-        compute_on_test_end: true
-        compute_every_n_epochs: 10
-        fad_metrics:
-          # Specific FAD models for comprehensive evaluation
-          - name: "fad_vggish_metric"
-            alias: "vggish"
-            params:
-              use_pca: false
-          - name: "fad_pann_metric"
-            alias: "pann"
-          - name: "fad_clap_metric"
-            alias: "clap"
-            params:
-              submodel_name: "630k-audioset"
-              enable_fusion: false
-          # AFX-Rep metric disabled - not supported by current frechet_audio_distance package
-          # - name: "fad_afxrep_metric"
-          #   alias: "afx-rep"
-        checkpoint_dir: "checkpoints_fad"
-        prefix: "fad"
+    # Frechet Audio Distance
+    # - class_path: nablafx.callbacks.FADComputationCallback
+    #   init_args:
+    #     compute_on_train_end: false
+    #     compute_on_test_end: true
+    #     compute_every_n_epochs: null
+    #     fad_metrics:
+    #       - name: "fad_vggish_metric"
+    #         alias: "vggish"
+    #         params:
+    #           use_pca: false
+    #       - name: "fad_pann_metric"
+    #         alias: "pann"
+    #       - name: "fad_clap_metric"
+    #         alias: "clap"
+    #         params:
+    #           submodel_name: "630k-audioset"
+    #           enable_fusion: false
+    #       # AFX-Rep metric disabled - not supported by current frechet_audio_distance package
+    #       # - name: "fad_afxrep_metric"
+    #       #   alias: "afx-rep"
+    #     checkpoint_dir: "checkpoints_fad"
+    #     prefix: "fad"
 
-    # 🎨 NablAFx Parameter Visualization - For gray-box models
-    - class_path: nablafx.callbacks.ParameterVisualizationCallback
+    - class_path: nablafx.callbacks.ParameterLoggingCallback
       init_args:
         log_on_train_start: true
         log_on_validation: true
         log_on_test: true
         log_test_batches: 10
-        max_samples_per_batch: 2
+        max_samples_per_batch: 5
 
-    # ⚡ Standard Lightning Callbacks
-    # - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+    - class_path: nablafx.callbacks.AudioChainLoggingCallback
+      init_args:
+        log_on_train_start: false
+        log_on_validation: true
+        log_on_test: true
+        log_test_batches: 5
+        max_samples_per_batch: 3
+        sample_rate: 48000
+
     - class_path: lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint
       init_args:
         save_last: true
@@ -103,13 +132,13 @@ trainer:
         monitor: loss/val/tot
         every_n_train_steps: 100
         filename: "{epoch}-{step}"
-    # - class_path: pytorch_lightning.callbacks.ModelSummary
+
     - class_path: lightning.pytorch.callbacks.ModelSummary
       init_args:
         max_depth: 2
-    # - class_path: pytorch_lightning.callbacks.LearningRateMonitor
+
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
-    # - class_path: pytorch_lightning.callbacks.EarlyStopping
+
     - class_path: lightning.pytorch.callbacks.EarlyStopping
       init_args:
         monitor: "loss/val/tot"

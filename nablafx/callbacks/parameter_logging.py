@@ -1,8 +1,8 @@
 """
-Parameter Visualization Callback
+Parameter Logging Callback
 
 Handles visualization of gray-box model parameters during training.
-Extracted from system.py to provide modular, configurable parameter visualization.
+Logs frequency response and parameters for each block in gray-box models.
 """
 
 import torch
@@ -13,9 +13,9 @@ from lightning.pytorch.callbacks import Callback
 from nablafx.plotting import plot_gb_model
 
 
-class ParameterVisualizationCallback(Callback):
+class ParameterLoggingCallback(Callback):
     """
-    Callback for visualizing gray-box model parameters.
+    Callback for logging and plotting gray-box model parameters.
 
     This callback handles the visualization of parameters and frequency responses
     for each block in gray-box models during training and testing.
@@ -59,7 +59,6 @@ class ParameterVisualizationCallback(Callback):
                     controls = None
 
                 input_audio = input_audio.to(pl_module.device)
-                target = target.to(pl_module.device)
 
                 # Log parameters
                 pl_module.model.reset_states()
@@ -170,60 +169,3 @@ class ParameterVisualizationCallback(Callback):
 
         except Exception as e:
             print(f"Warning: Failed to log response and parameters for {mode}: {e}")
-
-    def log_audio_at_each_block(
-        self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        input_audio: torch.Tensor,
-        controls: Optional[torch.Tensor],
-        mode: str = "debug",
-    ) -> None:
-        """
-        Log audio output at each block in the processing chain.
-
-        This method can be called manually for debugging purposes.
-        """
-        if not hasattr(trainer.logger, "experiment"):
-            return  # Skip if no wandb logger
-
-        try:
-            print(f"\nLogging audio at each block for {mode}...")
-
-            x = input_audio.to(pl_module.device)
-            y = [input_audio]  # Store audio at each stage
-
-            # Get control parameters
-            control_params = pl_module.model.controller(x, controls if controls is not None else None)
-
-            # Process through each block
-            for processor, ctrl_params in zip(pl_module.model.processor.processors, control_params):
-                if ctrl_params is not None:
-                    ctrl_params = ctrl_params.to(pl_module.device)
-
-                with torch.no_grad():
-                    y_i, _ = processor(x, ctrl_params, train=False)
-
-                y.append(y_i)
-                x = y[-1]
-
-            # Log audio for each block and each batch item
-            for block_idx, block_audio in enumerate(y):
-                for batch_idx in range(len(block_audio)):
-                    audio_np = block_audio[batch_idx].cpu().numpy()
-                    if audio_np.ndim > 1:
-                        audio_np = audio_np[0, :]  # Take first channel
-
-                    trainer.logger.experiment.log(
-                        {
-                            f"audio/chain/{batch_idx}/block{block_idx}": wandb.Audio(
-                                audio_np, 48000, caption=f"pred_{block_idx}_block{batch_idx}"
-                            )
-                        },
-                        step=trainer.global_step,
-                    )
-
-            print(f"Successfully logged audio at each block for {mode}")
-
-        except Exception as e:
-            print(f"Warning: Failed to log audio at each block for {mode}: {e}")

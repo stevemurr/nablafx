@@ -1,0 +1,40 @@
+# Example configuration for the split parameter visualization callbacks
+
+# Configuration for parameter logging (plots and parameters)
+parameter_logging_callback:
+  class_path: nablafx.callbacks.ParameterLoggingCallback
+  init_args:
+    log_on_train_start: true
+    log_on_validation: true
+    log_on_test: true
+    log_test_batches: 10
+    max_samples_per_batch: 5
+
+# Configuration for audio chain logging (audio at each block)
+audio_chain_logging_callback:
+  class_path: nablafx.callbacks.AudioChainLoggingCallback
+  init_args:
+    log_on_train_start: false
+    log_on_validation: true
+    log_on_test: true
+    log_test_batches: 5
+    max_samples_per_batch: 3
+    sample_rate: 48000
+# Use both in your trainer callbacks:
+# callbacks:
+#   - class_path: nablafx.callbacks.ParameterLoggingCallback
+#     init_args:
+#       log_on_train_start: true
+#       log_on_validation: true
+#       log_on_test: true
+#       log_test_batches: 10
+#       max_samples_per_batch: 5
+#
+#   - class_path: nablafx.callbacks.AudioChainLoggingCallback
+#     init_args:
+#       log_on_train_start: false
+#       log_on_validation: true
+#       log_on_test: true
+#       log_test_batches: 5
+#       max_samples_per_batch: 3
+#       sample_rate: 48000
