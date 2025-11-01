@@ -6,16 +6,15 @@ specific to particular neural architectures (TCN, GCN, S4) in NablaFX.
 """
 
 import torch
-from rational.torch import Rational
 
-from .components_tcn import FiLM, TFiLM, TinyTFiLM, TVFiLMMod, center_crop, causal_crop
+from .components_gcn import FiLM, TFiLM, TinyTFiLM, TVFiLMMod, center_crop, causal_crop
 
 # -----------------------------------------------------------------------------
-# TCN Conditional Block
+# GCN Conditional Block
 # -----------------------------------------------------------------------------
 
 
-class TCNCondBlock(torch.nn.Module):
+class GCNCondBlock(torch.nn.Module):
     """
     cond. types: None, FiLM, TFiLM, TVFiLM
 
@@ -25,8 +24,6 @@ class TCNCondBlock(torch.nn.Module):
                 if ttfilm -> cond_dim = number of control parameters
                 if tvfilm -> cond_dim = TVFiLMCond output_dim
     batchnorm:  available only for non-conditional models
-
-    activation types: Tanh, PReLU, Rational
     """
 
     def __init__(
@@ -45,14 +42,11 @@ class TCNCondBlock(torch.nn.Module):
         cond_dim,
         cond_block_size,
         cond_num_layers,
-        act_type,
     ):
-        super(TCNCondBlock, self).__init__()
+        super(GCNCondBlock, self).__init__()
         assert cond_dim >= 0
         assert cond_type in [None, "film", "tfilm", "ttfilm", "tvfilm"]
         assert cond_block_size > 0
-        assert cond_num_layers > 0
-        assert act_type in ["tanh", "prelu", "rational"]
 
         self.in_ch = in_ch
         self.out_ch = out_ch
@@ -68,36 +62,38 @@ class TCNCondBlock(torch.nn.Module):
         self.cond_dim = cond_dim
         self.cond_block_size = cond_block_size
         self.cond_num_layers = cond_num_layers
-        self.act_type = act_type
 
         # CONV
-        self.conv = torch.nn.Conv1d(in_ch, out_ch, kernel_size=kernel_size, padding=padding, dilation=dilation, groups=groups, bias=bias)
+        self.conv = torch.nn.Conv1d(
+            in_ch,
+            out_ch * 2,  # for the gated activation
+            kernel_size=kernel_size,
+            padding=padding,
+            dilation=dilation,
+            groups=groups,
+            bias=bias,
+        )
 
         # CONDITIONING/MODULATION
         if cond_type == "film":
-            self.film = FiLM(nfeatures=out_ch, cond_dim=cond_dim)
+            self.film = FiLM(nfeatures=out_ch * 2, cond_dim=cond_dim)
         elif cond_type == "tfilm":
-            self.film = TFiLM(nfeatures=out_ch, cond_dim=cond_dim, block_size=cond_block_size, num_layers=cond_num_layers)
+            self.film = TFiLM(nfeatures=out_ch * 2, cond_dim=cond_dim, block_size=cond_block_size, num_layers=cond_num_layers)
         elif cond_type == "ttfilm":
             self.film = TinyTFiLM(
-                nfeatures=out_ch, bottleneck_dim=4, cond_dim=cond_dim, block_size=cond_block_size, num_layers=cond_num_layers
+                nfeatures=out_ch * 2, bottleneck_dim=4, cond_dim=cond_dim, block_size=cond_block_size, num_layers=cond_num_layers
             )
         elif cond_type == "tvfilm":
-            self.film = TVFiLMMod(nfeatures=out_ch, cond_dim=cond_dim, block_size=cond_block_size)
+            self.film = TVFiLMMod(nfeatures=out_ch * 2, cond_dim=cond_dim, block_size=cond_block_size)
         elif cond_type is None and batchnorm:
-            self.bn = torch.nn.BatchNorm1d(out_ch)
+            self.bn = torch.nn.BatchNorm1d(out_ch * 2)
 
-        # ACTIVATIONS
-        if act_type == "tanh":
-            self.act = torch.nn.Tanh()
-        elif act_type == "prelu":
-            self.act = torch.nn.PReLU(num_parameters=out_ch)
-        elif act_type == "rational":
-            self.act = Rational(approx_func="tanh", degrees=[4, 3], version="A")
+        # GATED ACTIVATION
+        self.tanh = torch.nn.Tanh()
+        self.sigm = torch.nn.Sigmoid()
 
-        # RESIDUAL
-        if residual:
-            self.res = torch.nn.Conv1d(in_ch, out_ch, kernel_size=1, groups=in_ch, bias=False)
+        # MIX
+        self.mix = torch.nn.Conv1d(out_ch, out_ch, kernel_size=1, bias=bias)
 
     def forward(self, x, cond=None):
         """
@@ -106,27 +102,27 @@ class TCNCondBlock(torch.nn.Module):
                 if tvfilm -> cond = TVFiLMCond conditioning sequence
         """
 
-        x_in = x
+        x_res = x
 
         # CONV
-        x = self.conv(x)
+        y = self.conv(x)
 
         # CONDITIONING/MODULATION
         if self.cond_type is not None:
-            x = self.film(x, cond)
+            y = self.film(y, cond)
         elif self.cond_type is None and self.batchnorm:
-            x = self.bn(x)
+            y = self.bn(y)
 
-        # ACTIVATIONS
-        x = self.act(x)
+        # GATED ACTIVATION
+        z = self.tanh(y[:, : self.out_ch, :]) * self.sigm(y[:, self.out_ch :, :])
 
         # OUTPUT
         if self.residual:
-            x_res = self.res(x_in)
-
             if self.causal:
-                x = x + causal_crop(x_res, x.shape[-1])
+                x = self.mix(z) + causal_crop(x_res, z.shape[-1])
             else:
-                x = x + center_crop(x_res, x.shape[-1])
+                x = self.mix(z) + center_crop(x_res, z.shape[-1])
+        else:
+            x = self.mix(z)
 
-        return x
+        return x, z
