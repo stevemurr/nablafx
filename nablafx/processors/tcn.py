@@ -3,7 +3,6 @@ import torch
 from .components import MLP, TFiLM, TinyTFiLM, TVFiLMCond, causal_crop, center_crop
 from .blocks import TCNCondBlock
 
-
 """
 TCN (Conditional):
 
@@ -134,7 +133,7 @@ class TCN(torch.nn.Module):
             )
 
         # OUTPUT
-        self.output = torch.nn.Conv1d(out_ch, num_outputs, kernel_size=1, bias=bias)
+        self.output = torch.nn.Conv1d(out_ch, num_outputs, kernel_size=1, bias=True)
 
     def forward(self, x, p=None):
         # x = input : (batch, channels, seq)
