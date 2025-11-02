@@ -1,10 +1,9 @@
 import torch
 from rational.torch import Rational
-from typing import Tuple
+from typing import Tuple, Dict, Optional
 
 from .dsp import denormalize_parameters, biquad, sosfilt, sosfilt_via_fsm, lfilter_via_fsm
 from .siren import Modulator, SirenNet
-
 
 # -----------------------------------------------------------------------------
 # BASIC
@@ -30,12 +29,12 @@ class PhaseShift(torch.nn.Module):
         self.control_type = control_type
         self.num_control_params = 1
 
-    def get_param_dict(self, params: torch.Tensor):
+    def get_param_dict(self, params: torch.Tensor) -> Dict[str, torch.Tensor]:
         param_dict = {"shift": params[:, 0, :]}
         param_dict = denormalize_parameters(param_dict, self.param_ranges)
         return param_dict
 
-    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False):
+    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         bs_x, chs_x, seq_len_x = x.size()
         bs_c, chs_c, seq_len_c = control_params.size()
         assert bs_x == bs_c
@@ -46,7 +45,7 @@ class PhaseShift(torch.nn.Module):
         output = self.process(x, **param_dict, train=train)
         return output, param_dict
 
-    def process(self, x: torch.Tensor, shift: torch.Tensor, train: bool = False):
+    def process(self, x: torch.Tensor, shift: torch.Tensor, train: bool = False) -> torch.Tensor:
         bs, chs, seq_len = x.size()
         shift_rad = shift.view(bs, chs, -1) * (torch.pi / 180.0)
         shift_rad = shift_rad.repeat(1, 1, seq_len)
@@ -68,16 +67,16 @@ class PhaseInversion(torch.nn.Module):
         self.num_control_params = 0
         self.control_type = None
 
-    def get_param_dict(self, params: torch.Tensor):
+    def get_param_dict(self, params: torch.Tensor) -> Dict[str, torch.Tensor]:
         return {}
 
-    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False):
+    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         bs, chs, seq_len = x.size()
         assert chs == 1
         assert control_params is None
         return self.process(x, train=train), self.get_param_dict(control_params)
 
-    def process(self, x: torch.Tensor, train: bool = False):
+    def process(self, x: torch.Tensor, train: bool = False) -> torch.Tensor:
         return -x
 
 
@@ -103,12 +102,12 @@ class Gain(torch.nn.Module):
         self.lr_multiplier = lr_multiplier
         self.num_control_params = 1
 
-    def get_param_dict(self, params: torch.Tensor):
+    def get_param_dict(self, params: torch.Tensor) -> Dict[str, torch.Tensor]:
         param_dict = {"gain_db": params[:, 0, :]}
         param_dict = denormalize_parameters(param_dict, self.param_ranges)
         return param_dict
 
-    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False):
+    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         bs_x, chs_x, seq_len_x = x.size()
         bs_c, chs_c, seq_len_c = control_params.size()
         assert bs_x == bs_c
@@ -119,7 +118,7 @@ class Gain(torch.nn.Module):
         output = self.process(x, **param_dict, train=train)
         return output, param_dict
 
-    def process(self, x: torch.Tensor, gain_db: torch.Tensor, train: bool = False):
+    def process(self, x: torch.Tensor, gain_db: torch.Tensor, train: bool = False) -> torch.Tensor:
         bs, chs, seq_len = x.size()
         gain_ln = 10 ** (gain_db.view(bs, chs, -1) / 20.0)
         return x * gain_ln
@@ -147,12 +146,12 @@ class DCOffset(torch.nn.Module):
         self.lr_multiplier = lr_multiplier
         self.num_control_params = 1
 
-    def get_param_dict(self, params: torch.Tensor):
+    def get_param_dict(self, params: torch.Tensor) -> Dict[str, torch.Tensor]:
         param_dict = {"offset": params[:, 0, :]}
         param_dict = denormalize_parameters(param_dict, self.param_ranges)
         return param_dict
 
-    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False):
+    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         bs_x, chs_x, seq_len_x = x.size()
         bs_c, chs_c, seq_len_c = control_params.size()
         assert bs_x == bs_c
@@ -163,7 +162,7 @@ class DCOffset(torch.nn.Module):
         output = self.process(x, **param_dict, train=train)
         return output, param_dict
 
-    def process(self, x: torch.Tensor, offset: torch.Tensor, train: bool = False):
+    def process(self, x: torch.Tensor, offset: torch.Tensor, train: bool = False) -> torch.Tensor:
         bs, chs, seq_len = x.size()
         return x + offset.view(bs, chs, -1)
 
@@ -223,7 +222,7 @@ class ParametricEQ(torch.nn.Module):
         if control_type in ["dynamic", "dynamic-cond"]:
             self.pool = torch.nn.AvgPool1d(kernel_size=block_size)
 
-    def get_param_dict(self, params: torch.Tensor):
+    def get_param_dict(self, params: torch.Tensor) -> Dict[str, torch.Tensor]:
         param_dict = {
             "low_shelf_gain_db": params[:, 0, :],
             "low_shelf_cutoff_freq": params[:, 1, :],
@@ -244,7 +243,7 @@ class ParametricEQ(torch.nn.Module):
         param_dict = denormalize_parameters(param_dict, self.param_ranges)
         return param_dict
 
-    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False):
+    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         bs_x, chs_x, seq_len_x = x.size()
         bs_c, chs_c, seq_len_c = control_params.size()
         assert bs_x == bs_c
@@ -448,7 +447,7 @@ class ShelvingEQ(torch.nn.Module):
         if control_type in ["dynamic", "dynamic-cond"]:
             self.pool = torch.nn.AvgPool1d(kernel_size=block_size)
 
-    def get_param_dict(self, params: torch.Tensor):
+    def get_param_dict(self, params: torch.Tensor) -> Dict[str, torch.Tensor]:
         param_dict = {
             "highpass_cutoff_freq": params[:, 0, :],
             "highpass_q_factor": params[:, 1, :],
@@ -464,7 +463,7 @@ class ShelvingEQ(torch.nn.Module):
         param_dict = denormalize_parameters(param_dict, self.param_ranges)
         return param_dict
 
-    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False):
+    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         bs_x, chs_x, seq_len_x = x.size()
         bs_c, chs_c, seq_len_c = control_params.size()
         assert bs_x == bs_c
@@ -638,7 +637,7 @@ class Peaking(torch.nn.Module):
         if control_type in ["dynamic", "dynamic-cond"]:
             self.pool = torch.nn.AvgPool1d(kernel_size=block_size)
 
-    def get_param_dict(self, params: torch.Tensor):
+    def get_param_dict(self, params: torch.Tensor) -> Dict[str, torch.Tensor]:
         param_dict = {
             "band0_gain_db": params[:, 0, :],
             "band0_cutoff_freq": params[:, 1, :],
@@ -647,7 +646,7 @@ class Peaking(torch.nn.Module):
         param_dict = denormalize_parameters(param_dict, self.param_ranges)
         return param_dict
 
-    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False):
+    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         bs_x, chs_x, seq_len_x = x.size()
         bs_c, chs_c, seq_len_c = control_params.size()
         assert bs_x == bs_c
@@ -769,7 +768,7 @@ class Lowpass(torch.nn.Module):
         if control_type in ["dynamic", "dynamic-cond"]:
             self.pool = torch.nn.AvgPool1d(kernel_size=block_size)
 
-    def get_param_dict(self, params: torch.Tensor):
+    def get_param_dict(self, params: torch.Tensor) -> Dict[str, torch.Tensor]:
         param_dict = {
             "cutoff_freq": params[:, 0, :],
             "q_factor": params[:, 1, :],
@@ -777,7 +776,7 @@ class Lowpass(torch.nn.Module):
         param_dict = denormalize_parameters(param_dict, self.param_ranges)
         return param_dict
 
-    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False):
+    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         bs_x, chs_x, seq_len_x = x.size()
         bs_c, chs_c, seq_len_c = control_params.size()
         assert bs_x == bs_c
@@ -896,7 +895,7 @@ class Highpass(torch.nn.Module):
         if control_type in ["dynamic", "dynamic-cond"]:
             self.pool = torch.nn.AvgPool1d(kernel_size=block_size)
 
-    def get_param_dict(self, params: torch.Tensor):
+    def get_param_dict(self, params: torch.Tensor) -> Dict[str, torch.Tensor]:
         param_dict = {
             "band0_cutoff_freq": params[:, 0, :],
             "band0_q_factor": params[:, 1, :],
@@ -904,7 +903,7 @@ class Highpass(torch.nn.Module):
         param_dict = denormalize_parameters(param_dict, self.param_ranges)
         return param_dict
 
-    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False):
+    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         bs_x, chs_x, seq_len_x = x.size()
         bs_c, chs_c, seq_len_c = control_params.size()
         assert bs_x == bs_c
@@ -1026,7 +1025,7 @@ class Lowshelf(torch.nn.Module):
         if control_type in ["dynamic", "dynamic-cond"]:
             self.pool = torch.nn.AvgPool1d(kernel_size=block_size)
 
-    def get_param_dict(self, params: torch.Tensor):
+    def get_param_dict(self, params: torch.Tensor) -> Dict[str, torch.Tensor]:
         param_dict = {
             "band0_gain_db": params[:, 0, :],
             "band0_cutoff_freq": params[:, 1, :],
@@ -1035,7 +1034,7 @@ class Lowshelf(torch.nn.Module):
         param_dict = denormalize_parameters(param_dict, self.param_ranges)
         return param_dict
 
-    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False):
+    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         bs_x, chs_x, seq_len_x = x.size()
         bs_c, chs_c, seq_len_c = control_params.size()
         assert bs_x == bs_c
@@ -1160,7 +1159,7 @@ class Highshelf(torch.nn.Module):
         if control_type in ["dynamic", "dynamic-cond"]:
             self.pool = torch.nn.AvgPool1d(kernel_size=block_size)
 
-    def get_param_dict(self, params: torch.Tensor):
+    def get_param_dict(self, params: torch.Tensor) -> Dict[str, torch.Tensor]:
         param_dict = {
             "band0_gain_db": params[:, 0, :],
             "band0_cutoff_freq": params[:, 1, :],
@@ -1169,7 +1168,7 @@ class Highshelf(torch.nn.Module):
         param_dict = denormalize_parameters(param_dict, self.param_ranges)
         return param_dict
 
-    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False):
+    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         bs_x, chs_x, seq_len_x = x.size()
         bs_c, chs_c, seq_len_c = control_params.size()
         assert bs_x == bs_c
@@ -1294,10 +1293,10 @@ class StaticFIRFilter(torch.nn.Module):
             print(f"\nLoading weights from {state_dict_path}")
             self.load_state_dict(torch.load(state_dict_path))
 
-    def get_param_dict(self, params: torch.Tensor):
+    def get_param_dict(self, params: torch.Tensor) -> Dict[str, torch.Tensor]:
         return {}
 
-    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False):
+    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         bs, chs, seq_len = x.size()
         assert chs == 1
         assert control_params is None
@@ -1309,7 +1308,7 @@ class StaticFIRFilter(torch.nn.Module):
         impulse = impulse.permute(0, 2, 1).squeeze(1)
         return impulse
 
-    def process(self, x: torch.Tensor, train: bool = False):
+    def process(self, x: torch.Tensor, train: bool = False) -> torch.Tensor:
         b = self.extract_impulse_response(x)
         output = lfilter_via_fsm(x, b)
         return output
@@ -1332,16 +1331,16 @@ class TanhNonlinearity(torch.nn.Module):
         self.num_control_params = 0
         self.control_type = None
 
-    def get_param_dict(self, params: torch.Tensor):
+    def get_param_dict(self, params: torch.Tensor) -> Dict[str, torch.Tensor]:
         return {}
 
-    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False):
+    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         bs, chs, seq_len = x.size()
         assert chs == 1
         assert control_params is None
         return self.process(x, train=train)
 
-    def process(self, x: torch.Tensor, train: bool = False):
+    def process(self, x: torch.Tensor, train: bool = False) -> torch.Tensor:
         return torch.tanh(x), self.get_param_dict(None)
 
 
@@ -1384,16 +1383,16 @@ class StaticMLPNonlinearity(torch.nn.Module):
             print(f"Loading weights from {state_dict_path}")
             self.load_state_dict(torch.load(state_dict_path))
 
-    def get_param_dict(self, params: torch.Tensor):
+    def get_param_dict(self, params: torch.Tensor) -> Dict[str, torch.Tensor]:
         return {}
 
-    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False):
+    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         bs, chs, seq_len = x.size()
         assert chs == 1
         assert control_params is None
         return self.process(x, train=train), self.get_param_dict(control_params)
 
-    def process(self, x: torch.Tensor, train: bool = False):
+    def process(self, x: torch.Tensor, train: bool = False) -> torch.Tensor:
         return self.net(x.permute(0, 2, 1)).permute(0, 2, 1)
 
 
@@ -1420,14 +1419,14 @@ class StaticRationalNonlinearity(torch.nn.Module):
 
         self.net = Rational(init_approx_func, degrees, version="A")
 
-    def get_param_dict(self, params: torch.Tensor):
+    def get_param_dict(self, params: torch.Tensor) -> Dict[str, torch.Tensor]:
         return {}
 
-    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False):
+    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         bs, chs, seq_len = x.size()
         assert chs == 1
         assert control_params is None
         return self.process(x, train=train), self.get_param_dict(control_params)
 
-    def process(self, x: torch.Tensor, train: bool = False):
+    def process(self, x: torch.Tensor, train: bool = False) -> torch.Tensor:
         return self.net(x)

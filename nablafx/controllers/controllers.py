@@ -6,10 +6,9 @@ Controllers generate control parameters for processors based on input signals an
 """
 
 import torch
-from typing import Union
+from typing import Union, Optional, Tuple
 
 from nablafx.processors.components import MLP
-
 
 # -----------------------------------------------------------------------------
 # Dummy Controller
@@ -24,7 +23,7 @@ class DummyController(torch.nn.Module):
         self.num_controls = 0
         self.num_control_params = 0
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor) -> None:
         return None
 
 
@@ -55,7 +54,7 @@ class StaticController(torch.nn.Module):
 
         self.act = torch.nn.Sigmoid()
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         bs, chs, seq_len = x.size()
         return self.act(self.control_params).unsqueeze(0).unsqueeze(-1).repeat(bs, 1, 1)
 
@@ -93,7 +92,7 @@ class StaticCondController(torch.nn.Module):
             activation=torch.nn.Sigmoid(),
         )
 
-    def forward(self, controls: torch.Tensor):
+    def forward(self, controls: torch.Tensor) -> torch.Tensor:
         bs, chs = controls.shape
         assert chs == self.num_controls
 
@@ -154,7 +153,7 @@ class DynamicController(torch.nn.Module):
 
         self.act = torch.nn.Sigmoid()
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         bs, chs, seq_len = x.shape
         assert chs == 1
 
@@ -190,10 +189,10 @@ class DynamicController(torch.nn.Module):
         self.update_state(new_hidden_state)
         return control_params[..., :seq_len]
 
-    def reset_states(self):
+    def reset_states(self) -> None:
         self.reset_state()
 
-    def reset_state(self):
+    def reset_state(self) -> None:
         self.is_hidden_state_init = False
 
     def detach_states(self) -> None:
@@ -203,7 +202,7 @@ class DynamicController(torch.nn.Module):
         if self.is_hidden_state_init:
             self.hidden_state = tuple((h.detach() for h in self.hidden_state))
 
-    def update_state(self, new_hidden):
+    def update_state(self, new_hidden: Tuple[torch.Tensor, torch.Tensor]) -> None:
         self.hidden_state = new_hidden
         self.is_hidden_state_init = True
 
@@ -263,7 +262,7 @@ class DynamicCondController(torch.nn.Module):
 
         self.act = torch.nn.Sigmoid()
 
-    def forward(self, x: torch.Tensor, controls: torch.Tensor):
+    def forward(self, x: torch.Tensor, controls: torch.Tensor) -> torch.Tensor:
         bs_x, chs_x, seq_len_x = x.shape
         bs_c, chs_c = controls.shape
         assert bs_x == bs_c
@@ -308,10 +307,10 @@ class DynamicCondController(torch.nn.Module):
         self.update_state(new_hidden_state)
         return control_params[..., :seq_len_x]
 
-    def reset_states(self):
+    def reset_states(self) -> None:
         self.reset_state()
 
-    def reset_state(self):
+    def reset_state(self) -> None:
         self.is_hidden_state_init = False
 
     def detach_states(self) -> None:
@@ -321,6 +320,6 @@ class DynamicCondController(torch.nn.Module):
         if self.is_hidden_state_init:
             self.hidden_state = tuple((h.detach() for h in self.hidden_state))
 
-    def update_state(self, new_hidden):
+    def update_state(self, new_hidden: Tuple[torch.Tensor, torch.Tensor]) -> None:
         self.hidden_state = new_hidden
         self.is_hidden_state_init = True

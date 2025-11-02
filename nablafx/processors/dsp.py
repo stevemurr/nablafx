@@ -1,6 +1,7 @@
 import math
 import torch
 import torchaudio
+from typing import Dict, Tuple, Optional, Union
 
 
 # -----------------------------------------------------------------------------
@@ -8,11 +9,25 @@ import torchaudio
 # -----------------------------------------------------------------------------
 
 
-def denormalize(norm_val, max_val, min_val):
+def denormalize(
+    norm_val: Union[float, torch.Tensor], 
+    max_val: Union[float, torch.Tensor], 
+    min_val: Union[float, torch.Tensor]
+) -> Union[float, torch.Tensor]:
+    """Denormalize a value from [0, 1] to [min_val, max_val].
+    
+    Args:
+        norm_val: Normalized value in range [0, 1]
+        max_val: Maximum value of the target range
+        min_val: Minimum value of the target range
+        
+    Returns:
+        Denormalized value in range [min_val, max_val]
+    """
     return (norm_val * (max_val - min_val)) + min_val
 
 
-def denormalize_parameters(param_dict: dict, param_ranges: dict):
+def denormalize_parameters(param_dict: Dict[str, torch.Tensor], param_ranges: Dict[str, Tuple[float, float]]) -> Dict[str, torch.Tensor]:
     """Given parameters on (0,1) restore them to the ranges expected by the DSP device."""
     denorm_param_dict = {}
     for param_name, param_val in param_dict.items():
@@ -25,15 +40,16 @@ def denormalize_parameters(param_dict: dict, param_ranges: dict):
     return denorm_param_dict
 
 
-def fft_freqz(b, a, n_fft: int = 512):
+def fft_freqz(b: torch.Tensor, a: torch.Tensor, n_fft: int = 512) -> torch.Tensor:
     """Compute the complex frequency response via FFT of an IIR filter.
 
     Args:
-        b (torch.Tensor): Numerator coefficients with shape (bs, N)
-        a (torch.Tensor): Denominator coefficients with shape (bs, N)
-        n_fft (int): FFT size. Default: 512
+        b: Numerator coefficients with shape (bs, N)
+        a: Denominator coefficients with shape (bs, N)
+        n_fft: FFT size. Default: 512
+        
     Returns:
-        H (torch.Tensor): Complex frequency response with shape (bs, n_bins)
+        Complex frequency response with shape (bs, n_bins)
     """
     B = torch.fft.rfft(b, n_fft)
     A = torch.fft.rfft(a, n_fft)
@@ -41,14 +57,15 @@ def fft_freqz(b, a, n_fft: int = 512):
     return H
 
 
-def fft_sosfreqz(sos: torch.Tensor, n_fft: int = 512):
+def fft_sosfreqz(sos: torch.Tensor, n_fft: int = 512) -> torch.Tensor:
     """Compute the complex frequency response via FFT of cascade of biquads
 
     Args:
-        sos (torch.Tensor): Second order filter sections with shape (bs, n_sections, 6)
-        n_fft (int): FFT size. Default: 512
+        sos: Second order filter sections with shape (bs, n_sections, 6)
+        n_fft: FFT size. Default: 512
+        
     Returns:
-        H (torch.Tensor): Overall complex frequency response with shape (bs, n_bins)
+        Overall complex frequency response with shape (bs, n_bins)
     """
     bs, n_sections, n_coeffs = sos.size()
     assert n_coeffs == 6  # must be second order
@@ -62,22 +79,34 @@ def fft_sosfreqz(sos: torch.Tensor, n_fft: int = 512):
     return H
 
 
-def freqdomain_fir(x, H, n_fft):
+def freqdomain_fir(x: torch.Tensor, H: torch.Tensor, n_fft: int) -> torch.Tensor:
+    """Apply FIR filter in frequency domain.
+    
+    Args:
+        x: Input signal
+        H: Frequency response
+        n_fft: FFT size
+        
+    Returns:
+        Filtered signal
+    """
     X = torch.fft.rfft(x, n_fft)
     Y = X * H.type_as(X)
     y = torch.fft.irfft(Y, n_fft)
     return y
 
 
-def lfilter_via_fsm(x: torch.Tensor, b: torch.Tensor, a: torch.Tensor = None):
+def lfilter_via_fsm(x: torch.Tensor, b: torch.Tensor, a: Optional[torch.Tensor] = None) -> torch.Tensor:
     """Use the frequency sampling method to approximate an IIR filter.
     The filter will be applied along the final dimension of x.
+    
     Args:
-        x (torch.Tensor): Time domain signal with shape (bs, ... , timesteps)
-        b (torch.Tensor): Numerator coefficients with shape (bs, N).
-        a (torch.Tensor): Denominator coefficients with shape (bs, N).
+        x: Time domain signal with shape (bs, ... , timesteps)
+        b: Numerator coefficients with shape (bs, N)
+        a: Denominator coefficients with shape (bs, N). If None, applies FIR filter.
+        
     Returns:
-        y (torch.Tensor): Filtered time domain signal with shape (bs, ..., timesteps)
+        Filtered time domain signal with shape (bs, ..., timesteps)
     """
     bs = x.size(0)
 
@@ -109,16 +138,17 @@ def lfilter_via_fsm(x: torch.Tensor, b: torch.Tensor, a: torch.Tensor = None):
     return y
 
 
-def sosfilt_via_fsm(sos: torch.Tensor, x: torch.Tensor):
+def sosfilt_via_fsm(sos: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     """Use the frequency sampling method to approximate a cascade of second order IIR filters.
 
     The filter will be applied along the final dimension of x.
+    
     Args:
-        sos (torch.Tensor): Tensor of coefficients with shape (bs, n_sections, 6).
-        x (torch.Tensor): Time domain signal with shape (bs, ... , timesteps)
+        sos: Tensor of coefficients with shape (bs, n_sections, 6)
+        x: Time domain signal with shape (bs, ... , timesteps)
 
     Returns:
-        y (torch.Tensor): Filtered time domain signal with shape (bs, ..., timesteps)
+        Filtered time domain signal with shape (bs, ..., timesteps)
     """
     bs = x.size(0)
 
@@ -142,19 +172,20 @@ def sosfilt_via_fsm(sos: torch.Tensor, x: torch.Tensor):
     return y
 
 
-def sosfilt(sos: torch.Tensor, x: torch.Tensor):
+def sosfilt(sos: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     """Apply cascade of second order IIR filters in the time domain.
 
     The filter will be applied along the final dimension of x.
+    
     Args:
-        sos (torch.Tensor): Tensor of coefficients with shape (bs, n_sections, 6).
-        x (torch.Tensor): Time domain signal with shape (bs, chs, timesteps)
+        sos: Tensor of coefficients with shape (bs, n_sections, 6)
+        x: Time domain signal with shape (bs, chs, timesteps)
 
     Returns:
-        y (torch.Tensor): Filtered time domain signal with shape (bs, chs, timesteps)
+        Filtered time domain signal with shape (bs, chs, timesteps)
 
-    Note: no gradient computation will occur in this function.
-
+    Note:
+        No gradient computation will occur in this function.
     """
     x_bs, chs, seq_len = x.size()
     sos_bs, n_sections, n_coeffs = sos.size()
@@ -175,7 +206,22 @@ def biquad(
     q_factor: torch.Tensor,
     sample_rate: float,
     filter_type: str = "peaking",
-):
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Compute biquad filter coefficients.
+    
+    Args:
+        gain_db: Gain in decibels with shape (bs, ...)
+        cutoff_freq: Cutoff frequency in Hz with shape (bs, ...)
+        q_factor: Q factor with shape (bs, ...)
+        sample_rate: Sample rate in Hz
+        filter_type: Type of filter - one of "high_shelf", "low_shelf", "peaking", "low_pass", "high_pass"
+        
+    Returns:
+        Tuple of (b, a) where b and a are the numerator and denominator coefficients with shape (bs, 3)
+        
+    Raises:
+        ValueError: If filter_type is invalid
+    """
     bs = gain_db.size(0)
     # reshape params
     gain_db = gain_db.view(bs, -1)
