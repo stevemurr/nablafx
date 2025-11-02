@@ -6,13 +6,15 @@ that are shared across different neural architectures in NablaFX.
 """
 
 import torch
+from typing import Optional, Tuple
 
 # -----------------------------------------------------------------------------
 # Crop functions for residual connections
 # -----------------------------------------------------------------------------
 
 
-def center_crop(x, length: int):
+def center_crop(x: torch.Tensor, length: int) -> torch.Tensor:
+    """Center crop tensor to specified length."""
     if x.shape[-1] > length:
         start = (x.shape[-1] - length) // 2
         stop = start + length
@@ -21,7 +23,8 @@ def center_crop(x, length: int):
         return x
 
 
-def causal_crop(x, length: int):
+def causal_crop(x: torch.Tensor, length: int) -> torch.Tensor:
+    """Causally crop tensor to specified length."""
     if x.shape[-1] > length:
         stop = x.shape[-1] - 1
         start = stop - length
@@ -39,13 +42,22 @@ class MLP(torch.nn.Module):
     """
     MLP used in conditioning layers
 
-    num_layers
-    input_dim: input dimensions
-    hidden_dim: hidden dimensions
-    output_dim: output dimensions
+    Args:
+        input_dim: Input dimensions
+        output_dim: Output dimensions
+        num_layers: Number of layers
+        hidden_dim: Hidden dimensions
+        activation: Activation function
     """
 
-    def __init__(self, input_dim, output_dim, num_layers=3, hidden_dim=32, activation=torch.nn.ReLU()):
+    def __init__(
+        self, 
+        input_dim: int, 
+        output_dim: int, 
+        num_layers: int = 3, 
+        hidden_dim: int = 32, 
+        activation: torch.nn.Module = torch.nn.ReLU()
+    ):
         super(MLP, self).__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim
@@ -65,7 +77,7 @@ class MLP(torch.nn.Module):
 
         self.mlp = torch.nn.Sequential(*self.layers)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.mlp(x)
 
 
@@ -78,11 +90,12 @@ class FiLM(torch.nn.Module):
     """
     Given an input sequence x and conditioning parameters cond, modulates x.
 
-    nfeatures: number of features (i.e., convolution channels)
-    cond_dim: number of conditioning features
+    Args:
+        nfeatures: Number of features (i.e., convolution channels)
+        cond_dim: Number of conditioning features
     """
 
-    def __init__(self, nfeatures, cond_dim):
+    def __init__(self, nfeatures: int, cond_dim: int):
         super(FiLM, self).__init__()
         self.nfeatures = nfeatures
         self.cond_dim = cond_dim
@@ -90,7 +103,7 @@ class FiLM(torch.nn.Module):
         self.bn = torch.nn.BatchNorm1d(nfeatures, affine=False)
         self.adaptor = torch.nn.Linear(cond_dim, nfeatures * 2)
 
-    def forward(self, x, cond):
+    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
         # x = [batch, channels, length]
         # cond = [batch, cond_dim]
         cond = self.adaptor(cond)
@@ -112,19 +125,20 @@ class TFiLM(torch.nn.Module):
     Given an input sequence x and conditioning parameters cond,
     modulates x over time.
 
-    nfeatures: number of features (i.e., convolution channels)
-    cond_dim: number of control parameters, if cond_dim = 0, modulation is only a function of features
-    block_size: size of blocks to modulate
-    num_layers: number of LSTM layers
+    Args:
+        nfeatures: Number of features (i.e., convolution channels)
+        cond_dim: Number of control parameters, if cond_dim = 0, modulation is only a function of features
+        block_size: Size of blocks to modulate
+        num_layers: Number of LSTM layers
     """
 
-    def __init__(self, nfeatures, cond_dim, block_size, num_layers):
+    def __init__(self, nfeatures: int, cond_dim: int, block_size: int, num_layers: int):
         super(TFiLM, self).__init__()
         self.nfeatures = nfeatures
         self.cond_dim = cond_dim
         self.block_size = block_size
         self.num_layers = num_layers
-        self.hidden_state = None  # (hidden_state, cell_state)
+        self.hidden_state: Optional[Tuple[torch.Tensor, torch.Tensor]] = None  # (hidden_state, cell_state)
 
         # used to downsample input
         self.pool = torch.nn.MaxPool1d(kernel_size=block_size, stride=None, padding=0, dilation=1, return_indices=False, ceil_mode=False)
@@ -133,9 +147,16 @@ class TFiLM(torch.nn.Module):
             input_size=nfeatures + cond_dim, hidden_size=nfeatures * 2, num_layers=num_layers, batch_first=False, bidirectional=False
         )
 
-    def forward(self, x, cond=None):
+    def forward(self, x: torch.Tensor, cond: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
-        when cond is None, modulation is only a function of x
+        Apply temporal FiLM modulation.
+        
+        Args:
+            x: Input tensor [batch, nchannels, length]
+            cond: Optional conditioning parameters [batch, nparams]
+            
+        Returns:
+            Modulated tensor
         """
         # x = [batch, nchannels, length]
         # cond = [batch, nparams]
@@ -195,7 +216,8 @@ class TFiLM(torch.nn.Module):
 
         return x_out
 
-    def reset_state(self):
+    def reset_state(self) -> None:
+        """Reset LSTM hidden state."""
         self.hidden_state = None
 
 
@@ -209,20 +231,22 @@ class TinyTFiLM(torch.nn.Module):
     Given an input sequence x and conditioning parameters cond,
     modulates x over time.
 
-    nfeatures: number of features (i.e., convolution channels)
-    cond_dim: number of control parameters, if cond_dim = 0, modulation is only a function of features
-    block_size: size of blocks to modulate
-    num_layers: number of LSTM layers
+    Args:
+        nfeatures: Number of features (i.e., convolution channels)
+        bottleneck_dim: Bottleneck dimension
+        cond_dim: Number of control parameters, if cond_dim = 0, modulation is only a function of features
+        block_size: Size of blocks to modulate
+        num_layers: Number of LSTM layers
     """
 
-    def __init__(self, nfeatures, bottleneck_dim, cond_dim, block_size, num_layers):
+    def __init__(self, nfeatures: int, bottleneck_dim: int, cond_dim: int, block_size: int, num_layers: int):
         super(TinyTFiLM, self).__init__()
         self.nfeatures = nfeatures
         self.bottleneck_dim = bottleneck_dim
         self.cond_dim = cond_dim
         self.block_size = block_size
         self.num_layers = num_layers
-        self.hidden_state = None  # (hidden_state, cell_state)
+        self.hidden_state: Optional[Tuple[torch.Tensor, torch.Tensor]] = None  # (hidden_state, cell_state)
 
         # used to downsample input
         self.pool = torch.nn.MaxPool1d(kernel_size=block_size, stride=None, padding=0, dilation=1, return_indices=False, ceil_mode=False)
@@ -244,9 +268,16 @@ class TinyTFiLM(torch.nn.Module):
             torch.nn.ReLU(),
         )
 
-    def forward(self, x, cond=None):
+    def forward(self, x: torch.Tensor, cond: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
-        when cond is None, modulation is only a function of x
+        Apply tiny temporal FiLM modulation.
+        
+        Args:
+            x: Input tensor [batch, nchannels, length]
+            cond: Optional conditioning parameters [batch, nparams]
+            
+        Returns:
+            Modulated tensor
         """
         # x = [batch, nchannels, length]
         # cond = [batch, nparams]
@@ -311,7 +342,8 @@ class TinyTFiLM(torch.nn.Module):
 
         return x_out
 
-    def reset_state(self):
+    def reset_state(self) -> None:
+        """Reset LSTM hidden state."""
         self.hidden_state = None
 
 
@@ -325,12 +357,13 @@ class TVFiLMMod(torch.nn.Module):
     Given an input sequence x and a conditioning sequence cond_seq,
     returns a modulated sequence.
 
-    nfeatures: number of input channels
-    cond_dim: number of channels for conditioning sequence
-    block_size: size of blocks to modulate
+    Args:
+        nfeatures: Number of input channels
+        cond_dim: Number of channels for conditioning sequence
+        block_size: Size of blocks to modulate
     """
 
-    def __init__(self, nfeatures, cond_dim, block_size):
+    def __init__(self, nfeatures: int, cond_dim: int, block_size: int):
         super(TVFiLMMod, self).__init__()
         self.nfeatures = nfeatures
         self.cond_dim = cond_dim
@@ -338,7 +371,7 @@ class TVFiLMMod(torch.nn.Module):
 
         self.adaptor = torch.nn.Conv1d(cond_dim, nfeatures * 2, kernel_size=1)
 
-    def forward(self, x, cond_seq):
+    def forward(self, x: torch.Tensor, cond_seq: torch.Tensor) -> torch.Tensor:
         # x = [batch, channels, length]
         # cond_seq = [batch, cond_dim, length]
 
@@ -388,14 +421,15 @@ class TVFiLMCond(torch.nn.Module):
     returns a conditioning sequence that modulates FiLM layers
     over time.
 
-    input_dim: number of input channels
-    output_dim: number of channels for conditioning sequence
-    cond_dim: number of control parameters, if cond_dim = 0, modulation is only a function of x
-    block_size: size of blocks to modulate
-    num_layers: number of LSTM layers
+    Args:
+        input_dim: Number of input channels
+        output_dim: Number of channels for conditioning sequence
+        cond_dim: Number of control parameters, if cond_dim = 0, modulation is only a function of x
+        block_size: Size of blocks to modulate
+        num_layers: Number of LSTM layers
     """
 
-    def __init__(self, input_dim, output_dim, cond_dim, block_size, num_layers):
+    def __init__(self, input_dim: int, output_dim: int, cond_dim: int, block_size: int, num_layers: int):
         super(TVFiLMCond, self).__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim
@@ -404,7 +438,7 @@ class TVFiLMCond(torch.nn.Module):
         self.num_layers = num_layers
 
         # initialized as a tensor for torchscript tracing
-        self.hidden_state = (
+        self.hidden_state: Tuple[torch.Tensor, torch.Tensor] = (
             torch.zeros(
                 1,
             ),
@@ -412,7 +446,7 @@ class TVFiLMCond(torch.nn.Module):
                 1,
             ),
         )
-        self.is_hidden_state_init = False
+        self.is_hidden_state_init: bool = False
 
         # used to downsample input
         self.pool = torch.nn.MaxPool1d(kernel_size=block_size, stride=None, padding=0, dilation=1, return_indices=False, ceil_mode=False)
@@ -421,9 +455,16 @@ class TVFiLMCond(torch.nn.Module):
             input_size=input_dim + cond_dim, hidden_size=output_dim, num_layers=num_layers, batch_first=False, bidirectional=False
         )
 
-    def forward(self, x, cond=None):
+    def forward(self, x: torch.Tensor, cond: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
-        when cond is None, modulation is only a function of x
+        Generate conditioning sequence.
+        
+        Args:
+            x: Input tensor [batch, nchannels, length]
+            cond: Optional conditioning parameters [batch, nparams]
+            
+        Returns:
+            Conditioning sequence [batch, output_dim, nsteps]
         """
         # x = [batch, nchannels, length]
         # cond = [batch, nparams]
@@ -464,14 +505,17 @@ class TVFiLMCond(torch.nn.Module):
         self.update_state(new_hidden_state)
         return cond_seq  # [batch, output_dim, nsteps]
 
-    def update_state(self, new_hidden):
+    def update_state(self, new_hidden: Tuple[torch.Tensor, torch.Tensor]) -> None:
+        """Update LSTM hidden state."""
         self.hidden_state = new_hidden
         self.is_hidden_state_init = True
 
     def detach_state(self) -> None:
+        """Detach LSTM hidden state from computation graph."""
         if self.is_hidden_state_init:
             # TODO(cm): check whether clone is required or not
             self.hidden_state = tuple((h.detach().clone() for h in self.hidden_state))
 
-    def reset_state(self):
+    def reset_state(self) -> None:
+        """Reset LSTM hidden state."""
         self.is_hidden_state_init = False
