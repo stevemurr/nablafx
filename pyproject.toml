@@ -86,8 +86,13 @@ Repository = "https://github.com/mcomunita/nablafx.git"
 "Paper" = "https://arxiv.org/abs/2502.11668"
 
 [tool.setuptools]
-packages = ["nablafx", "nablafx.core", "nablafx.processors", "nablafx.controllers", "nablafx.data", "nablafx.evaluation", "nablafx.callbacks", "nablafx.utils"]
 include-package-data = true
+
+# Automatically discover all packages under nablafx/
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["nablafx*"]
+exclude = ["tests*", "benchmarks*", "scripts*", "docs*"]
 
 [tool.setuptools.package-data]
 nablafx = ["py.typed"]
