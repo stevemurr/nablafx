@@ -2,6 +2,7 @@ import math
 import torch
 import numpy as np
 from torch import nn
+from typing import Optional, Tuple
 import torch.nn.functional as F
 
 # Adapted from https://github.com/lucidrains/siren-pytorch
@@ -10,11 +11,11 @@ import torch.nn.functional as F
 # helpers
 
 
-def exists(val):
+def exists(val) -> bool:
     return val is not None
 
 
-def cast_tuple(val, repeat=1):
+def cast_tuple(val, repeat: int = 1) -> Tuple:
     return val if isinstance(val, tuple) else ((val,) * repeat)
 
 
@@ -22,11 +23,11 @@ def cast_tuple(val, repeat=1):
 
 
 class Sine(nn.Module):
-    def __init__(self, w0=1.0):
+    def __init__(self, w0: float = 1.0):
         super().__init__()
         self.w0 = w0
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return torch.sin(self.w0 * x)
 
 
@@ -42,7 +43,7 @@ class Siren(nn.Module):
         c: float = 6.0,
         is_first: bool = False,
         use_bias: bool = True,
-        activation: bool = None,
+        activation: Optional[nn.Module] = None,
     ):
         super().__init__()
         self.dim_in = dim_in
@@ -56,7 +57,7 @@ class Siren(nn.Module):
         self.bias = nn.Parameter(bias) if use_bias else None
         self.activation = Sine(w0) if activation is None else activation
 
-    def init_(self, weight, bias, c, w0):
+    def init_(self, weight: torch.Tensor, bias: Optional[torch.Tensor], c: float, w0: float) -> None:
         dim = self.dim_in
 
         w_std = (1 / dim) if self.is_first else (math.sqrt(c / dim) / w0)
@@ -65,7 +66,7 @@ class Siren(nn.Module):
         if exists(bias):
             bias.uniform_(-w_std, w_std)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = F.linear(x, self.weight, self.bias)
         out = self.activation(out)
         return out
@@ -74,14 +75,14 @@ class Siren(nn.Module):
 class SirenNet(nn.Module):
     def __init__(
         self,
-        dim_in,
-        dim_hidden,
-        dim_out,
-        num_layers,
-        w0=1.0,
-        w0_initial=30.0,
-        use_bias=True,
-        final_activation=None,
+        dim_in: int,
+        dim_hidden: int,
+        dim_out: int,
+        num_layers: int,
+        w0: float = 1.0,
+        w0_initial: float = 30.0,
+        use_bias: bool = True,
+        final_activation: Optional[nn.Module] = None,
     ):
         super().__init__()
         self.num_layers = num_layers
@@ -112,7 +113,7 @@ class SirenNet(nn.Module):
             activation=final_activation,
         )
 
-    def forward(self, x, mods=None):
+    def forward(self, x: torch.Tensor, mods: Optional[Tuple[torch.Tensor, ...]] = None) -> torch.Tensor:
         bs, num, in_dim = x.size()
 
         if mods is not None:
@@ -131,7 +132,7 @@ class SirenNet(nn.Module):
 
 
 class Modulator(nn.Module):
-    def __init__(self, dim_in, dim_hidden, num_layers):
+    def __init__(self, dim_in: int, dim_hidden: int, num_layers: int):
         super().__init__()
         self.layers = nn.ModuleList([])
 
@@ -141,7 +142,7 @@ class Modulator(nn.Module):
 
             self.layers.append(nn.Sequential(nn.Linear(dim, dim_hidden), nn.Sigmoid()))
 
-    def forward(self, z):
+    def forward(self, z: torch.Tensor) -> Tuple[torch.Tensor, ...]:
         x = z
         hiddens = []
 

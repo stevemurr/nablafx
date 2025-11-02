@@ -1,4 +1,5 @@
 import torch
+from typing import Optional
 
 from .components import TVFiLMCond
 
@@ -17,16 +18,16 @@ class LSTM(torch.nn.Module):
 
     def __init__(
         self,
-        num_inputs=1,
-        num_outputs=1,
-        num_controls=0,
-        hidden_size=32,
-        num_layers=1,
-        residual=False,
-        direct_path=False,
-        cond_type=None,
-        cond_block_size=128,
-        cond_num_layers=1,
+        num_inputs: int = 1,
+        num_outputs: int = 1,
+        num_controls: int = 0,
+        hidden_size: int = 32,
+        num_layers: int = 1,
+        residual: bool = False,
+        direct_path: bool = False,
+        cond_type: Optional[str] = None,
+        cond_block_size: int = 128,
+        cond_num_layers: int = 1,
     ):
         super().__init__()
 
@@ -87,7 +88,7 @@ class LSTM(torch.nn.Module):
 
         self.lin = torch.nn.Linear(self.hidden_size, self.num_outputs)
 
-    def forward(self, x, p=None):
+    def forward(self, x: torch.Tensor, p: Optional[torch.Tensor] = None) -> torch.Tensor:
         # x = input : [batch, num_inputs, length]
         # p = params : [batch, num_controls]
 

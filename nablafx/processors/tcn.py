@@ -1,4 +1,5 @@
 import torch
+from typing import Optional
 
 from .components import MLP, TFiLM, TinyTFiLM, TVFiLMCond, causal_crop, center_crop
 from .blocks import TCNCondBlock
@@ -22,25 +23,25 @@ class TCN(torch.nn.Module):
 
     def __init__(
         self,
-        num_inputs=1,
-        num_outputs=1,
-        num_controls=0,
-        num_blocks=10,
-        kernel_size=3,
-        dilation_growth=2,
-        channel_growth=1,
-        channel_width=32,
-        stack_size=10,
-        groups=1,
-        bias=False,
-        causal=False,
-        batchnorm=False,
-        residual=False,
-        direct_path=False,
-        cond_type=None,
-        cond_block_size=128,
-        cond_num_layers=1,
-        act_type="tanh",
+        num_inputs: int = 1,
+        num_outputs: int = 1,
+        num_controls: int = 0,
+        num_blocks: int = 10,
+        kernel_size: int = 3,
+        dilation_growth: int = 2,
+        channel_growth: int = 1,
+        channel_width: int = 32,
+        stack_size: int = 10,
+        groups: int = 1,
+        bias: bool = False,
+        causal: bool = False,
+        batchnorm: bool = False,
+        residual: bool = False,
+        direct_path: bool = False,
+        cond_type: Optional[str] = None,
+        cond_block_size: int = 128,
+        cond_num_layers: int = 1,
+        act_type: str = "tanh",
     ):
         super().__init__()
 
@@ -135,7 +136,7 @@ class TCN(torch.nn.Module):
         # OUTPUT
         self.output = torch.nn.Conv1d(out_ch, num_outputs, kernel_size=1, bias=True)
 
-    def forward(self, x, p=None):
+    def forward(self, x: torch.Tensor, p: Optional[torch.Tensor] = None) -> torch.Tensor:
         # x = input : (batch, channels, seq)
         # p = params : (batch, params)
 

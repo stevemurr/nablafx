@@ -2,6 +2,7 @@ import os
 import torch
 from einops import rearrange
 from torch import Tensor
+from typing import Optional
 
 import sys
 
@@ -25,7 +26,7 @@ class S4(torch.nn.Module):
         batchnorm: bool = False,
         residual: bool = False,
         direct_path: bool = False,
-        cond_type: str = None,
+        cond_type: Optional[str] = None,
         cond_block_size: int = 128,
         cond_num_layers: int = 1,
         act_type: str = "tanh",
@@ -126,7 +127,7 @@ class S4(torch.nn.Module):
 
         return x
 
-    def forward(self, x: Tensor, p: Tensor = None) -> Tensor:
+    def forward(self, x: Tensor, p: Optional[Tensor] = None) -> Tensor:
         # x = input : (batch, channels, seq)
         # p = params : (batch, params)
         bs, chs, seq_len = x.size()
