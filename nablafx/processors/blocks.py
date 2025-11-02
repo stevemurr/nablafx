@@ -9,10 +9,10 @@ import math
 import torch
 from einops import rearrange, repeat
 from torch import Tensor
+from typing import Optional
 from rational.torch import Rational
 
 from .components import FiLM, TFiLM, TinyTFiLM, TVFiLMMod, center_crop, causal_crop
-
 
 # -----------------------------------------------------------------------------
 # TCN Conditional Block
@@ -35,21 +35,21 @@ class TCNCondBlock(torch.nn.Module):
 
     def __init__(
         self,
-        in_ch,
-        out_ch,
-        causal,
-        batchnorm,
-        residual,
-        kernel_size,
-        padding,
-        dilation,
-        groups,
-        bias,
-        cond_type,
-        cond_dim,
-        cond_block_size,
-        cond_num_layers,
-        act_type,
+        in_ch: int,
+        out_ch: int,
+        causal: bool,
+        batchnorm: bool,
+        residual: bool,
+        kernel_size: int,
+        padding: int,
+        dilation: int,
+        groups: int,
+        bias: bool,
+        cond_type: Optional[str],
+        cond_dim: int,
+        cond_block_size: int,
+        cond_num_layers: int,
+        act_type: str,
     ):
         super(TCNCondBlock, self).__init__()
         assert cond_dim >= 0
@@ -103,7 +103,7 @@ class TCNCondBlock(torch.nn.Module):
         if residual:
             self.res = torch.nn.Conv1d(in_ch, out_ch, kernel_size=1, groups=in_ch, bias=False)
 
-    def forward(self, x, cond=None):
+    def forward(self, x: Tensor, cond: Optional[Tensor] = None) -> Tensor:
         """
         cond:   if film -> cond = conditioning MLP output
                 if tfilm -> cond = control parameters
@@ -155,20 +155,20 @@ class GCNCondBlock(torch.nn.Module):
 
     def __init__(
         self,
-        in_ch,
-        out_ch,
-        causal,
-        batchnorm,
-        residual,
-        kernel_size,
-        padding,
-        dilation,
-        groups,
-        bias,
-        cond_type,
-        cond_dim,
-        cond_block_size,
-        cond_num_layers,
+        in_ch: int,
+        out_ch: int,
+        causal: bool,
+        batchnorm: bool,
+        residual: bool,
+        kernel_size: int,
+        padding: int,
+        dilation: int,
+        groups: int,
+        bias: bool,
+        cond_type: Optional[str],
+        cond_dim: int,
+        cond_block_size: int,
+        cond_num_layers: int,
     ):
         super(GCNCondBlock, self).__init__()
         assert cond_dim >= 0
@@ -222,7 +222,7 @@ class GCNCondBlock(torch.nn.Module):
         # MIX
         self.mix = torch.nn.Conv1d(out_ch, out_ch, kernel_size=1, bias=bias)
 
-    def forward(self, x, cond=None):
+    def forward(self, x: Tensor, cond: Optional[Tensor] = None) -> Tensor:
         """
         cond:   if film -> cond = conditioning MLP output
                 if tfilm -> cond = control parameters
@@ -292,7 +292,7 @@ class DSSM(torch.nn.Module):
 
         self.D = torch.nn.Parameter(torch.randn(H))
 
-    def get_kernel(self, length: int):  # `length` is `L`
+    def get_kernel(self, length: int) -> Tensor:  # `length` is `L`
         dt = torch.exp(self.log_dt)  # (H)
         C = r2c(self.C)  # (H N)
         A = -torch.exp(self.log_A_real) + 1j * self.A_imag  # (H N)
@@ -304,7 +304,7 @@ class DSSM(torch.nn.Module):
         K = 2 * torch.einsum("hn, hnl -> hl", C, torch.exp(P)).real
         return K
 
-    def register(self, name: str, tensor: Tensor, lr: float = None):
+    def register(self, name: str, tensor: Tensor, lr: Optional[float] = None) -> None:
         if lr == 0.0:
             self.register_buffer(name, tensor)
         else:
@@ -315,7 +315,7 @@ class DSSM(torch.nn.Module):
                 optim["lr"] = lr
             setattr(getattr(self, name), "_optim", optim)
 
-    def forward(self, u: Tensor, length: Tensor = None):
+    def forward(self, u: Tensor, length: Tensor = None) -> Tensor:
         # Input and output shape (B H L)
         assert u.dim() == 3
         B, H, L = u.size()
@@ -370,7 +370,7 @@ class S4CondBlock(torch.nn.Module):
         residual: bool,
         s4_state_dim: int,
         s4_learning_rate: float,
-        cond_type: str,
+        cond_type: Optional[str],
         cond_dim: int,
         cond_block_size: int,
         cond_num_layers: int,
@@ -435,7 +435,7 @@ class S4CondBlock(torch.nn.Module):
                 bias=False,
             )
 
-    def forward(self, x: Tensor, cond: Tensor = None) -> Tensor:
+    def forward(self, x: Tensor, cond: Optional[Tensor] = None) -> Tensor:
 
         x_in = x
 

@@ -5,6 +5,7 @@ import PIL.Image
 import numpy as np
 import scipy.signal
 import matplotlib.pyplot as plt
+from typing import Optional, Dict
 
 from torchvision.transforms import ToTensor
 
@@ -22,7 +23,7 @@ from nablafx.processors import (
 )
 
 
-def fig2img(fig, dpi=120):
+def fig2img(fig: plt.Figure, dpi: int = 120) -> torch.Tensor:
     """Convert a matplotlib figure to JPEG to be show in Tensorboard."""
     buf = io.BytesIO()
     fig.savefig(buf, format="jpeg", dpi=dpi)
@@ -33,7 +34,7 @@ def fig2img(fig, dpi=120):
     return image
 
 
-def plot_static_params(param_dict: dict, param_ax: plt.Axes, batch_idx: int = 0):
+def plot_static_params(param_dict: Dict[str, torch.Tensor], param_ax: plt.Axes, batch_idx: int = 0) -> None:
     y_val = 0.90
     x_val = 0.025
     for param_idx, (param, param_val) in enumerate(param_dict.items()):
@@ -60,12 +61,12 @@ def plot_static_params(param_dict: dict, param_ax: plt.Axes, batch_idx: int = 0)
 
 def plot_phase_inv(
     processor: PhaseInversion,
-    param_dict: dict,
+    param_dict: Dict[str, torch.Tensor],
     input: torch.Tensor,
     batch_idx: int,
     response_ax: plt.Axes,
     param_ax: plt.Axes,
-):
+) -> None:
     w = np.linspace(1, 24000, num=50)
     h = np.ones(50) * -1
 
@@ -88,12 +89,12 @@ def plot_phase_inv(
 
 def plot_gain(
     processor: Gain,
-    param_dict: dict,
+    param_dict: Dict[str, torch.Tensor],
     input: torch.Tensor,
     batch_idx: int,
     response_ax: plt.Axes,
     param_ax: plt.Axes,
-):
+) -> None:
     min_gain_db = processor.param_ranges["gain_db"][0]
     max_gain_db = processor.param_ranges["gain_db"][1]
     seq_len = input.shape[-1]
@@ -215,12 +216,12 @@ def plot_dc_offset(
 
 def plot_parametric_eq(
     processor: ParametricEQ,
-    param_dict: dict,
+    param_dict: Dict[str, torch.Tensor],
     input: torch.Tensor,
     batch_idx: int,
     response_ax: plt.Axes,
     param_ax: plt.Axes,
-):
+) -> None:
     min_gain_db = processor.min_gain_db
     max_gain_db = processor.max_gain_db
     seq_len = input.shape[-1]
@@ -298,12 +299,12 @@ def plot_parametric_eq(
 
 def plot_lowpass(
     processor: Lowpass,
-    param_dict: dict,
+    param_dict: Dict[str, torch.Tensor],
     input: torch.Tensor,
     batch_idx: int,
     response_ax: plt.Axes,
     param_ax: plt.Axes,
-):
+) -> None:
     seq_len = input.shape[-1]
     sample_rate = processor.sample_rate
 
@@ -380,12 +381,12 @@ def plot_lowpass(
 
 def plot_highpass(
     processor: Highpass,
-    param_dict: dict,
+    param_dict: Dict[str, torch.Tensor],
     input: torch.Tensor,
     batch_idx: int,
     response_ax: plt.Axes,
     param_ax: plt.Axes,
-):
+) -> None:
     seq_len = input.shape[-1]
     sample_rate = processor.sample_rate
 
@@ -461,12 +462,12 @@ def plot_highpass(
 
 def plot_fir_filter(
     processor: StaticFIRFilter,
-    param_dict: dict,
+    param_dict: Dict[str, torch.Tensor],
     input: torch.Tensor,
     batch_idx: int,
     response_ax: plt.Axes,
     param_ax: plt.Axes,
-):
+) -> None:
     seq_len = input.shape[-1]
     sample_rate = processor.sample_rate
     # reconstruct param tensor from dict
@@ -514,12 +515,12 @@ def plot_fir_filter(
 
 def plot_static_mlp_nonlinearity(
     processor: StaticMLPNonlinearity,
-    param_dict: dict,
+    param_dict: Dict[str, torch.Tensor],
     input: torch.Tensor,
     batch_idx: int,
     response_ax: plt.Axes,
     param_ax: plt.Axes,
-):
+) -> None:
     # reconstruct param tensor from dict
     params = torch.zeros(1, len(list(param_dict.keys())))
     for idx, (param_name, param_val) in enumerate(param_dict.items()):
@@ -560,12 +561,12 @@ def plot_static_mlp_nonlinearity(
 
 def plot_static_rational_nonlinearity(
     processor: StaticRationalNonlinearity,
-    param_dict: dict,
+    param_dict: Dict[str, torch.Tensor],
     input: torch.Tensor,
     batch_idx: int,
     response_ax: plt.Axes,
     param_ax: plt.Axes,
-):
+) -> None:
     # reconstruct param tensor from dict
     params = torch.zeros(1, len(list(param_dict.keys())))
     for idx, (param_name, param_val) in enumerate(param_dict.items()):
