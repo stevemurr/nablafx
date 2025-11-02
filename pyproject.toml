@@ -1,9 +1,111 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "nablafx"
 version = "0.1.0"
-description = ""
+description = "Differentiable black-box and gray-box audio effects modeling framework"
+readme = "README.md"
 requires-python = ">=3.9,<3.10"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Marco Comunità", email = "m.comunita@qmul.ac.uk"},
+    {name = "Christian J. Steinmetz"},
+    {name = "Joshua D. Reiss"},
+]
+maintainers = [
+    {name = "Marco Comunità", email = "m.comunita@qmul.ac.uk"},
+]
+keywords = [
+    "audio",
+    "audio-effects",
+    "deep-learning",
+    "differentiable-dsp",
+    "pytorch",
+    "audio-processing",
+    "neural-audio",
+    "black-box-modeling",
+    "gray-box-modeling",
+    "machine-learning",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Multimedia :: Sound/Audio :: Analysis",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 
 dependencies = [
-  "rational-activations==0.2.0"
+    "auraloss>=0.4.0",
+    "einops>=0.8.0",
+    "frechet_audio_distance",
+    "jsonargparse[signatures]>=4.27.7",
+    "lightning>=2.3.2",
+    "lightning-utilities>=0.11.3",
+    "matplotlib>=3.9.1",
+    "natsort",
+    "numpy>=1.26.4,<2.0",
+    "scipy>=1.13.1",
+    "torch>=2.2.2",
+    "torchaudio>=2.2.2",
+    "torchmetrics>=1.4.0",
+    "torchvision>=0.17.2",
+    "typing-extensions>=4.12.2",
+    "wandb>=0.17.4",
+    # Note: rational-activations must be installed separately with --no-deps
+    # It declares torch==1.7.1 but works fine with torch>=2.2.2
+    # See INSTALL.md for installation instructions
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "black>=23.0",
+    "isort>=5.12",
+    "flake8>=6.0",
+    "mypy>=1.0",
+]
+docs = [
+    "sphinx>=6.0",
+    "sphinx-rtd-theme>=1.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/mcomunita/nablafx"
+Documentation = "https://github.com/mcomunita/nablafx#readme"
+Repository = "https://github.com/mcomunita/nablafx.git"
+"Bug Tracker" = "https://github.com/mcomunita/nablafx/issues"
+"Installation Guide" = "https://github.com/mcomunita/nablafx/blob/main/INSTALL.md"
+"Paper" = "https://arxiv.org/abs/2502.11668"
+
+[tool.setuptools]
+packages = ["nablafx", "nablafx.core", "nablafx.processors", "nablafx.controllers", "nablafx.data", "nablafx.evaluation", "nablafx.callbacks", "nablafx.utils"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+nablafx = ["py.typed"]
+
+# Include weights directory at root level
+[tool.setuptools.data-files]
+"share/nablafx/weights" = ["weights/*.pt", "weights/*.json"]
+
+[tool.black]
+line-length = 120
+target-version = ['py39']
+
+[tool.isort]
+profile = "black"
+line_length = 120
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false

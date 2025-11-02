@@ -8,3 +8,11 @@ wandb
 .DS_Store
 .*
 !.gitignore
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Test environment
+test_nablafx_env/

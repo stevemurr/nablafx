@@ -1,0 +1,29 @@
+# Include documentation and metadata
+include README.md
+include LICENSE
+include UPDATES.md
+include INSTALL.md
+
+# Include configuration files
+include pyproject.toml
+
+# Include type information
+include nablafx/py.typed
+
+# Include weights - these are needed for rational-activations config
+include weights/*.pt
+include weights/*.json
+graft weights
+
+# Include configuration examples (optional - users can get from repo)
+# recursive-include cfg *.yaml
+
+# Exclude unnecessary files
+global-exclude __pycache__
+global-exclude *.py[co]
+global-exclude .DS_Store
+exclude .gitignore
+recursive-exclude tests *
+recursive-exclude benchmarks *
+recursive-exclude scripts *
+recursive-exclude docs *
