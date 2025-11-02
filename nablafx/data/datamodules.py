@@ -1,6 +1,6 @@
 import torch
 import lightning as pl
-from typing import List, Union
+from typing import List, Union, Optional
 
 from .datasets import PluginDataset, ParametricPluginDataset
 
@@ -34,7 +34,7 @@ class DryWetFilesPluginDataModule(pl.LightningDataModule):
         self,
         root_dir_dry: str,
         root_dir_wet: str,
-        params_idxs_to_use: Union[List, None] = None,
+        params_idxs_to_use: Optional[Union[List[int], None]] = None,
         data_to_use: float = 1.0,
         trainval_split: float = 0.8,
         sample_length: int = -1,
@@ -56,7 +56,7 @@ class DryWetFilesPluginDataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
 
-    def setup(self, stage=None):
+    def setup(self, stage: Optional[str] = None) -> None:
         if stage == "fit" or stage == "validate":
             if self.params_idxs_to_use is None:
                 self.trainval_dataset = PluginDataset(
@@ -111,7 +111,7 @@ class DryWetFilesPluginDataModule(pl.LightningDataModule):
             self.test_dataset.print()
             print()
 
-    def train_dataloader(self):
+    def train_dataloader(self) -> torch.utils.data.DataLoader:
         return torch.utils.data.DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
@@ -121,7 +121,7 @@ class DryWetFilesPluginDataModule(pl.LightningDataModule):
             pin_memory=True,
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self) -> torch.utils.data.DataLoader:
         return torch.utils.data.DataLoader(
             self.val_dataset,
             batch_size=self.batch_size,
@@ -129,7 +129,7 @@ class DryWetFilesPluginDataModule(pl.LightningDataModule):
             pin_memory=True,
         )
 
-    def test_dataloader(self):
+    def test_dataloader(self) -> torch.utils.data.DataLoader:
         return torch.utils.data.DataLoader(
             self.test_dataset,
             batch_size=self.batch_size,

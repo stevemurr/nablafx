@@ -4,6 +4,7 @@ import glob
 import torch
 import torchaudio
 import numpy as np
+from typing import List, Tuple, Optional, Dict, Any
 
 from natsort import natsorted
 
@@ -20,12 +21,12 @@ class PluginDataset(torch.utils.data.Dataset):
 
     def __init__(
         self,
-        root_dir_dry,
-        root_dir_wet,
-        data_to_use=1.0,
-        sample_length=48000,
-        sample_rate=48000,
-        preload=False,
+        root_dir_dry: str,
+        root_dir_wet: str,
+        data_to_use: float = 1.0,
+        sample_length: int = 48000,
+        sample_rate: int = 48000,
+        preload: bool = False,
     ):
 
         self.root_dir_dry = root_dir_dry
@@ -126,10 +127,10 @@ class PluginDataset(torch.utils.data.Dataset):
 
         self.minutes = len(self.samples) * self.sample_length / self.sample_rate / 60.0
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.samples)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         if self.preload:
             input = self.samples[idx]["input_audio"]
             target = self.samples[idx]["target_audio"]
@@ -151,13 +152,13 @@ class PluginDataset(torch.utils.data.Dataset):
                 )
         return input, target
 
-    def _load(self, filepath, frame_offset=0, num_frames=-1):
+    def _load(self, filepath: str, frame_offset: int = 0, num_frames: int = -1) -> Tuple[torch.Tensor, int]:
         x, sr = torchaudio.load(filepath, frame_offset, num_frames, normalize=True, channels_first=True)
         if sr != self.sample_rate:
             x = torchaudio.functional.resample(x, sr, self.sample_rate)
         return x, sr
 
-    def print(self):
+    def print(self) -> None:
         print("\nPluginDataset:")
         print(f"num_samples: {len(self.samples)}")
         print(f"sample_length: {self.sample_length}")
@@ -288,10 +289,10 @@ class ParametricPluginDataset(torch.utils.data.Dataset):
 
         self.minutes = len(self.samples) * self.sample_length / self.sample_rate / 60.0
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.samples)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         if self.preload:
             input = self.samples[idx]["input_audio"]
             target = self.samples[idx]["target_audio"]
@@ -317,13 +318,13 @@ class ParametricPluginDataset(torch.utils.data.Dataset):
 
         return input, target, params
 
-    def _load(self, filepath, frame_offset=0, num_frames=-1):
+    def _load(self, filepath: str, frame_offset: int = 0, num_frames: int = -1) -> Tuple[torch.Tensor, int]:
         x, sr = torchaudio.load(filepath, frame_offset, num_frames, normalize=True, channels_first=True)
         if sr != self.sample_rate:
             x = torchaudio.functional.resample(x, sr, self.sample_rate)
         return x, sr
 
-    def print(self):
+    def print(self) -> None:
         print("\nParametricPluginDataset:")
         print(f"num_samples: {len(self.samples)}")
         print(f"sample_length: {self.sample_length}")
