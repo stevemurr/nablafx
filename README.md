@@ -1,5 +1,5 @@
 <div align="center">
-<img width="250px" src="assets/nablafx_1.png">
+<img width="250px" src="https://raw.githubusercontent.com/mcomunita/nablafx/master/assets/nablafx_1.png">
 <br><br>
   
 # NablAFx
@@ -50,57 +50,79 @@ It incorporates implementations of established black-box architectures and condi
 
 To show your support please consider giving this repo a star :star:. Thanks! :metal:
 
-## Setup
+## Installation
 
-NablAFx was developed with Python 3.9.7.
+### For Research & Experimentation (Recommended)
 
-PIP - Install requirements. First the **temporary** ones (for rational activations), than the **updated** ones:
+Clone the repository for full access to training scripts, configurations, and examples:
 
-```
+```bash
+# Clone the repository
+git clone https://github.com/mcomunita/nablafx.git
+cd nablafx
+
+# Create virtual environment
 python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements_temp-for-rnl.txt
-pip install --upgrade -r requirements.txt
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install NablaFX in editable mode
+pip install -e .
+
+# Install rational-activations (required, installed separately due to dependency conflicts)
+pip install rational-activations==0.2.0 --no-deps
+
+# Copy rational config file
+python -c "
+import urllib.request
+from pathlib import Path
+import rational
+url = 'https://raw.githubusercontent.com/mcomunita/nablafx/master/weights/rationals_config.json'
+target = Path(rational.__file__).parent / 'rationals_config.json'
+urllib.request.urlretrieve(url, target)
+print(f'✅ Config downloaded to {target}')
+"
 ```
 
-move `weights/rationals_config.json` to: `.venv/lib/python3.9/site-packages/rational/rationals_config.json`.
+### For Quick Evaluation or Using as a Library
 
-CONDA - Install requirements. First the **temporary** ones (for rational activations), than the **updated** ones:
+Install from PyPI if you want to quickly test NablaFX or use its components in your own projects:
+
+```bash
+pip install nablafx
+pip install rational-activations==0.2.0 --no-deps
 ```
-conda env create -f environment_temp-for-rnl.yaml
-conda env update -f environment.yml
-conda activate nablafx
-```
 
-move `weights/rationals_config.json` to: `~/.conda/envs/nablafx/lib/python3.9/site-packages/rational/rationals_config.json`.
+See [INSTALL.md](INSTALL.md) for detailed installation instructions.
 
-## Data
+## Setup for Training
 
-NablAFx is setup to work with the [ToneTwist AFx Dataset](https://github.com/mcomunita/tonetwist-afx-dataset), and so are the dataset classes provided in `./nablafx/data.py`, but you can also write your own custom class and use a different dataset.
+### Data
+
+NablAFx is setup to work with the [ToneTwist AFx Dataset](https://github.com/mcomunita/tonetwist-afx-dataset), and so are the dataset classes provided in `./nablafx/data/`, but you can also write your own custom class and use a different dataset.
 
 Make data folder and either move data to that folder or create a symbolic link:
 
-```
+```bash
 mkdir data
 cd data
 ln -s /path/to/TONETWIST-AFX-DATASET/
 ```
 
-## Logs
+### Logs
 
 NablAFx is setup to use _Weights&Biases_ for logging so, create an account and `wandb login` from terminal.
 
-```
+```bash
 mkdir logs
 ```
 
-Please note that if you want to save the logs to a specific subfolder, this needs to be created in advance (see `cfg/trainer/trainer_bb.yaml` for an example.
+Please note that if you want to save the logs to a specific subfolder, this needs to be created in advance (see `cfg/trainer/trainer_bb.yaml` for an example).
 
-## Frechét Audio Distance checkpoints
+### Frechét Audio Distance checkpoints
 
 The checkpoints to compute Frechét Audio Distance need to be in specific folders:
 
-```
+```bash
 mkdir checkpoints_fad
 ```
 
@@ -154,12 +176,12 @@ While it looks complicated, it is just the case of replacing the paths to: model
 
 ## Params, FLOPs, MACs and Real-time factor:
 
-Scripts to measure all these metrics of a model are in the `tests` folder. The code is not very organized and beautiful at the moment but does the job.
+Scripts to measure all these metrics of a model are in the `benchmarks` folder. The code is not very organized and beautiful at the moment but does the job.
 
 ## Pre-train MLP Nonlinearity or FIR
 
-The script to pretrain differentiable processors (see `nablafx/processors.py`) like a `StaticMLPNonlinearity` or a `StaticFIRFilter` is `scripts/pretrain.py`.
-Examples of pretrained nonlinearities and filters are in `weights`.
+The script to pretrain differentiable processors (see `nablafx/processors/ddsp.py`) like a `StaticMLPNonlinearity` or a `StaticFIRFilter` is `nablafx/scripts/pretrain.py`.
+Examples of pretrained nonlinearities and filters are in `nablafx/weights`.
 
 ## Contributions
 

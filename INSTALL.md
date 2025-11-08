@@ -32,16 +32,14 @@ try:
     rational_dir = Path(rational.__file__).parent
     config_target = rational_dir / 'rationals_config.json'
     
-    if config_target.exists():
-        print('✅ Config already exists')
-    else:
-        # Download from GitHub
-        url = 'https://raw.githubusercontent.com/mcomunita/nablafx/main/weights/rationals_config.json'
-        urllib.request.urlretrieve(url, config_target)
-        print(f'✅ Downloaded config to {config_target}')
+    # Always download and overwrite to ensure correct config
+    # Download from GitHub
+    url = 'https://raw.githubusercontent.com/mcomunita/nablafx/master/weights/rationals_config.json'
+    urllib.request.urlretrieve(url, config_target)
+    print(f'✅ Downloaded config to {config_target}')
 except Exception as e:
     print(f'⚠️  Please manually download rationals_config.json')
-    print(f'   from: https://github.com/mcomunita/nablafx/blob/main/weights/rationals_config.json')
+    print(f'   from: https://github.com/mcomunita/nablafx/blob/master/weights/rationals_config.json')
     print(f'   Error: {e}')
 "
 ```
@@ -70,12 +68,10 @@ try:
     rational_dir = Path(rational.__file__).parent
     config_target = rational_dir / 'rationals_config.json'
     
-    if config_target.exists():
-        print('✅ Config already exists')
-    else:
-        url = 'https://raw.githubusercontent.com/mcomunita/nablafx/main/weights/rationals_config.json'
-        urllib.request.urlretrieve(url, config_target)
-        print(f'✅ Downloaded config to {config_target}')
+    # Always download and overwrite to ensure correct config
+    url = 'https://raw.githubusercontent.com/mcomunita/nablafx/master/weights/rationals_config.json'
+    urllib.request.urlretrieve(url, config_target)
+    print(f'✅ Downloaded config to {config_target}')
 except Exception as e:
     print(f'⚠️  Please manually download rationals_config.json')
 "

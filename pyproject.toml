@@ -1,22 +1,19 @@
-[build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "nablafx"
-version = "0.1.0"
+version = "0.1.5"
 description = "Differentiable black-box and gray-box audio effects modeling framework"
 readme = "README.md"
-requires-python = ">=3.9,<3.10"
+requires-python = ">=3.9"
 license = {file = "LICENSE"}
+
 authors = [
     {name = "Marco Comunità", email = "m.comunita@qmul.ac.uk"},
-    {name = "Christian J. Steinmetz"},
-    {name = "Joshua D. Reiss"},
 ]
+
 maintainers = [
     {name = "Marco Comunità", email = "m.comunita@qmul.ac.uk"},
 ]
+
 keywords = [
     "audio",
     "audio-effects",
@@ -29,6 +26,7 @@ keywords = [
     "gray-box-modeling",
     "machine-learning",
 ]
+
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -63,6 +61,12 @@ dependencies = [
     # See INSTALL.md for installation instructions
 ]
 
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
@@ -72,6 +76,7 @@ dev = [
     "flake8>=6.0",
     "mypy>=1.0",
 ]
+
 docs = [
     "sphinx>=6.0",
     "sphinx-rtd-theme>=1.2",
@@ -82,7 +87,7 @@ Homepage = "https://github.com/mcomunita/nablafx"
 Documentation = "https://github.com/mcomunita/nablafx#readme"
 Repository = "https://github.com/mcomunita/nablafx.git"
 "Bug Tracker" = "https://github.com/mcomunita/nablafx/issues"
-"Installation Guide" = "https://github.com/mcomunita/nablafx/blob/main/INSTALL.md"
+"Installation Guide" = "https://github.com/mcomunita/nablafx/blob/master/INSTALL.md"
 "Paper" = "https://arxiv.org/abs/2502.11668"
 
 [tool.setuptools]
