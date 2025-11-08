@@ -1,6 +1,6 @@
 [project]
 name = "nablafx"
-version = "0.1.5"
+version = "1.0.0"
 description = "Differentiable black-box and gray-box audio effects modeling framework"
 readme = "README.md"
 requires-python = ">=3.9"
