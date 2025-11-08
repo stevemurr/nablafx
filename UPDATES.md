@@ -1,334 +1,64 @@
-# NablAFx Updates Roadmap
+# NablaFX Changelog
 
-## 🚀 Implementation Progress
+## Version 1.0.0 (November 2025)
 
-### ✅ Completed (Week 1)
-- **WeightedMultiLoss System**: Implemented flexible loss function composition
-  - ✅ `WeightedMultiLoss` class with validation and error handling
-  - ✅ Updated `system.py` to handle new loss format with backward compatibility
-  - ✅ Support for multiple loss functions with individual weights and names
-  - ✅ Created test suite and configuration examples
-  - 📍 **Location**: `nablafx/loss.py`, `tests-code/test_weighted_multi_loss.py`
+### Major Features
 
-### ✅ Completed (Week 1-2)  
-- **Configuration Migration**: Updated all existing YAML configs to use new loss system
-  - ✅ **101 configuration files migrated** from `TimeAndFrequencyDomainLoss` to `WeightedMultiLoss`
-  - ✅ **Automated migration script** created (`scripts/migrate_loss_configs.py`)
-  - ✅ **Safe migration process** with backup files for all changes
-  - ✅ **Full verification** - no old loss configurations remain
-  - 📍 **Location**: `cfg-new/` directory, `MIGRATION_SUMMARY.md`
+#### 1. Modular Package Structure
+- Reorganized into logical subpackages: `core/`, `processors/`, `controllers/`, `data/`, `evaluation/`, `callbacks/`, `utils/`
+- Clear API boundaries with well-defined public interfaces
+- Clean separation between black-box and gray-box modeling systems
 
-### ✅ Completed (Week 2)
-- **Callback System**: Extract logging functions from system.py into callback classes
-  - ✅ Created modular callback architecture using PyTorch Lightning's callback system
-  - ✅ **AudioLoggingCallback** - Configurable audio sample logging with W&B integration
-  - ✅ **MetricsLoggingCallback** - Flexible metrics computation and logging system
-  - ✅ **FrequencyResponseCallback** - Frequency response visualization at configurable intervals
-  - ✅ **FADComputationCallback** - Multi-model FAD score computation (VGGish, PANN, CLAP, AFX-Rep)
-  - ✅ **ParameterVisualizationCallback** - Gray-box model parameter and response visualization
-  - ✅ **AudioChainLoggingCallback** - Audio logging at each processing block
-  - ✅ **Configuration-driven setup** - Full YAML configuration support for all callbacks
-  - ✅ **Backward compatibility** - Works with existing system classes without breaking changes
-  - ✅ **Trainer configuration migration** - Updated all `cfg-new/trainer/` configs to use callbacks
-  - 📍 **Location**: `nablafx/callbacks/`, `cfg-new/trainer/`, `examples/`
+#### 2. Flexible Loss Composition System
+- **FlexibleLoss**: Dynamic loss composition from YAML configuration
+- **EvaluationRegistry**: Registry-based function discovery for losses and metrics
+- Support for differentiable and non-differentiable evaluation functions
+- Comprehensive evaluation functions: time-domain, frequency-domain, and audio-specific metrics
 
-### ✅ Completed (Week 2-3)
-- **Package Structure Refactoring**: Reorganized modules into logical subpackages
-  - ✅ **Modular architecture** - Separated into `core/`, `processors/`, `controllers/`, `data/`, `evaluation/`, `callbacks/`, `utils/`
-  - ✅ **Clear API boundaries** - Public APIs exported via `__init__.py` files
-  - ✅ **Clean separation of concerns** - Core interfaces, models, and systems properly organized
-  - ✅ **Version tracking** - Package version defined in `pyproject.toml`
-  - 📍 **Location**: `nablafx/` directory structure
-
-### ✅ Completed (Week 2-3)
-- **Evaluation Registry System**: Flexible loss and metric composition
-  - ✅ **EvaluationRegistry** - Registry-based function discovery system
-  - ✅ **FlexibleLoss** - Dynamic loss composition from configuration
-  - ✅ **FlexibleLossWithMetrics** - Combined loss and metrics computation
-  - ✅ **Comprehensive evaluation functions** - Time-domain, frequency-domain, and audio-specific metrics
-  - ✅ **Differentiability tracking** - Automatic validation of loss function compatibility
-  - 📍 **Location**: `nablafx/evaluation/`
-
-### ✅ Completed (Week 3)
-- **Testing Infrastructure**: Comprehensive test suite
-  - ✅ **Unit tests** - Processor tests for GCN, LSTM, S4, TCN with direct comparisons
-  - ✅ **Integration tests** - Datamodules, datasets, and model tests
-  - ✅ **Test organization** - Structured in `tests/unit/` and `tests/code/`
-  - ✅ **Equivalence testing** - Gradient and training equivalence tests for processors
-  - 📍 **Location**: `tests/`
-
-### ✅ Completed (Week 3-4)
-- **Type Hints Enhancement**: Add comprehensive type hints to all modules
-  - ✅ **processors/dsp.py** - All DSP utility functions (denormalize, fft_freqz, lfilter_via_fsm, biquad, sosfilt, etc.)
-  - ✅ **processors/ddsp.py** - 1434 lines with automated script for all DDSP processors (Gain, DCOffset, ParametricEQ, filters, nonlinearities)
-  - ✅ **processors/components.py** - Neural network components (MLP, FiLM, TFiLM, TinyTFiLM, TVFiLMMod, TVFiLMCond)
-  - ✅ **controllers/controllers.py** - All 5 controller classes with proper type annotations
-  - ✅ **data/datasets.py** - Dataset classes (PluginDataset, ParametricPluginDataset) via automated script
-  - ✅ **data/datamodules.py** - PyTorch Lightning DataModule and dataloader methods
-  - ✅ **utils/utilities.py** - Utility classes (already had complete type hints)
-  - ✅ **processors/blocks.py** - Architecture-specific blocks (TCNCondBlock, GCNCondBlock, DSSM, S4CondBlock)
-  - ✅ **utils/plotting.py** - 14 visualization functions with automated script
-  - ✅ **Architecture processors** - All model files (siren.py, tcn.py, gcn.py, lstm.py, s4.py)
-  - ✅ **Type annotations** - Using `Optional`, `Dict`, `Tuple`, and explicit tensor types throughout
-  - ✅ **Automated scripts** - Created helper scripts for batch type hint additions to large files
-  - 📍 **Location**: All modules in `nablafx/` now have comprehensive type hints
-
-### ✅ Completed (Week 4)
-- **PyPI Package Distribution**: Created complete PyPI distribution package
-  - ✅ **Package configuration** - Complete `pyproject.toml` with all metadata and dependencies
-  - ✅ **Type hints marker** - `py.typed` file for PEP 561 compliance
-  - ✅ **Distribution control** - `MANIFEST.in` for file inclusion/exclusion
-  - ✅ **Build automation** - `scripts/build_package.sh` for package building
-  - ✅ **Installation testing** - `scripts/test_install.sh` with clean environment validation
-  - ✅ **Special dependency handling** - `rational-activations` installed with `--no-deps` to avoid torch version conflict
-  - ✅ **Documentation** - INSTALL.md, PYPI_INSTALL.md, and PYPI_SETUP_SUMMARY.md
-  - ✅ **Build validation** - Package builds successfully (236 KB wheel, 2.0 MB source)
-  - ✅ **Installation validation** - Clean installation test passed with all imports working
-  - ✅ **Distribution files** - Ready for TestPyPI and PyPI upload
-  - 📍 **Location**: `pyproject.toml`, `MANIFEST.in`, `scripts/`, `dist/`
-
-### ⏳ Next Up
-- **Distribution & Packaging**: PyPI packaging, conda packages, Docker containers
-
----
-
-## Immediate Priority: Loss Functions & Logging 🔥
-
-### Why These Are Critical
-The current hardcoded loss instantiation and embedded logging in system classes limit:
-
-- **Experimental flexibility** - Researchers can't easily try different loss combinations
-- **Code reusability** - Logging logic is tightly coupled to specific system classes
-- **Configuration transparency** - Loss configurations are scattered across code and configs
-- **Callback extensibility** - Adding new logging features requires modifying core classes
-
-### Quick Implementation Plan (Weeks 1-2)
-
-#### Week 1: Loss Function System
-1. ✅ **~~Create `nablafx.loss.registry`~~** **→ Implemented `WeightedMultiLoss`** - Flexible loss composition system
-2. ✅ **Implement `WeightedMultiLoss`** - Base class for combining multiple loss functions ✅ **COMPLETED**
-3. ✅ **Add loss validation** - Check compatibility and parameter constraints ✅ **COMPLETED**
-4. 🔄 **Update existing configurations** - Migrate current loss setups to new system **IN PROGRESS**
-
-#### Week 2: Callback System  
-1. **Extract logging methods** from system.py into callback classes
-2. **Create base callback interface** - Common functionality and lifecycle hooks
-3. **Update trainer configurations** - Enable callback specification in YAML
-4. **Add callback examples** - Documentation and configuration templates
-
-### Expected Impact
-- **Faster experimentation** - New loss functions configurable without code changes
-- **Cleaner architecture** - Separation of concerns between training logic and logging
-- **Better reproducibility** - Complete experimental setup captured in configuration
-- **Easier contribution** - Community can add callbacks without touching core training loop
-
----
-
-## Streamlined Roadmap (Based on User Priorities)
-
-## Overview
-This document tracks the development of NablAFx framework improvements, focusing on practical enhancements that support research productivity.
-
-## Current State Analysis
-
-### Strengths
-- ✅ Well-structured black-box and gray-box modeling framework
-- ✅ Clean separation between processors, controllers, and models (modular package structure)
-- ✅ Comprehensive callback system for flexible logging
-- ✅ Registry-based evaluation system with flexible loss composition
-- ✅ Good integration with PyTorch Lightning and Weights & Biases
-- ✅ Extensive test coverage for processors and data modules
-- ✅ Comprehensive examples and configurations
-
-### Remaining Work
-- Distribution and packaging for wider adoption
-
----
-
-## Completed Work Summary
-
-### 1. ✅ Package Structure & Organization
-**Status**: COMPLETED  
-**Timeline**: Week 2-3
-
-- Modular structure with `core/`, `processors/`, `controllers/`, `data/`, `evaluation/`, `callbacks/`, `utils/`
-- Clean separation of concerns with proper interfaces
-- Clear API boundaries via `__init__.py` files
-- Version tracking in `pyproject.toml`
-
-### 2. ✅ Loss Function Configuration System
-**Status**: COMPLETED  
-**Timeline**: Week 1
-
-- `FlexibleLoss` with registry-based composition
-- `EvaluationRegistry` for function discovery
-- Support for differentiable and non-differentiable functions
-- Comprehensive evaluation functions (time-domain, frequency-domain, audio-specific)
+#### 3. Callback-Based Logging System
+- Modular PyTorch Lightning callback architecture
+- **AudioLoggingCallback**: Configurable audio sample logging with W&B integration
+- **MetricsLoggingCallback**: Flexible metrics computation and logging
+- **FrequencyResponseCallback**: Frequency response visualization
+- **FADComputationCallback**: Multi-model FAD score computation (VGGish, PANN, CLAP, AFX-Rep)
+- **ParameterVisualizationCallback**: Gray-box model parameter and response visualization
+- **AudioChainLoggingCallback**: Audio logging at each processing block
 - Full YAML configuration support
 
-### 3. ✅ Callback-Based Logging System
-**Status**: COMPLETED  
-**Timeline**: Week 2
+#### 4. Comprehensive Type Hints
+- Complete type annotations across all modules
+- Support for modern Python type checking with mypy
+- Better IDE support and error detection
+- PEP 561 compliant with `py.typed` marker
 
-- 6 callback types: Audio, Metrics, Frequency Response, FAD, Parameter, Audio Chain
-- Full PyTorch Lightning integration
-- Configuration-driven setup via YAML
-- Backward compatibility with existing systems
+#### 5. PyPI Distribution Package
+- Available on PyPI: `pip install nablafx`
+- Comprehensive installation documentation
 
-### 4. ✅ Testing Infrastructure
-**Status**: COMPLETED  
-**Timeline**: Week 3
-
-- Unit tests for all processors (GCN, LSTM, S4, TCN)
+#### 6. Testing Infrastructure
+- Unit tests for all processor architectures (GCN, LSTM, S4, TCN)
 - Direct comparison tests with reference implementations
-- Gradient and training equivalence tests
-- Integration tests for datamodules, datasets, and models
+- Gradient and training equivalence validation
+- Integration tests for datamodules and datasets
 
-### 5. ✅ Configuration Migration
-**Status**: COMPLETED  
-**Timeline**: Week 1-2
+### Configuration Changes
 
-- 101+ configuration files migrated to new loss system
-- Automated migration scripts
-- Full verification with backups
+- **101+ configuration files** migrated to new FlexibleLoss system
+- All trainer configs updated to use callback system
 
-### 6. ✅ Type Hints Enhancement
-**Status**: COMPLETED  
-**Timeline**: Week 3-4
+### Dependencies
 
-- Comprehensive type hints added to all modules using `typing` module
-- **Processors**: dsp.py, ddsp.py (1434 lines), components.py, blocks.py, siren.py, tcn.py, gcn.py, lstm.py, s4.py
-- **Controllers**: All 5 controller classes with proper type annotations
-- **Data**: datasets.py, datamodules.py with PyTorch Lightning types
-- **Utils**: plotting.py (14 functions), utilities.py
-- Automated scripts created for batch type hint additions to large files
-- Type annotations using `Optional`, `Dict`, `Tuple`, and explicit tensor types
-- All files compile without syntax errors
+- Python >= 3.9
+- PyTorch >= 2.2.2
+- PyTorch Lightning >= 2.3.2
+- See `pyproject.toml` for full dependency list
 
----
+### Documentation
 
-## Remaining Work
+- [README.md](README.md) - Overview and quick start
+- [INSTALL.md](INSTALL.md) - Detailed installation guide
+- Configuration examples in `cfg/` directory
 
-### Priority 1: Distribution & Packaging  
-**Status**: PLANNED  
-**Estimated Time**: 1-2 weeks
+### Credits
 
-#### Scope
-
-**2.1 PyPI Package**
-- Complete `pyproject.toml` with full metadata and dependencies
-- Add `setup.py` or modern `pyproject.toml`-only setup
-- Create distribution scripts
-- Test installation in clean environment
-- Publish to PyPI (or TestPyPI first)
-
-**2.2 Conda Package**
-- Create `meta.yaml` for conda-forge
-- Define conda dependencies (especially for CUDA/audio libs)
-- Build and test conda package
-- Submit to conda-forge (optional)
-
-**2.3 Docker Containers**
-- Create Dockerfile with all dependencies
-- Include CUDA support for GPU training
-- Add docker-compose for easy setup
-- Document Docker usage
-
-**2.4 Documentation**
-- Installation instructions for all methods
-- Dependency management guide
-- Environment setup guide
-- Quick start guide
-
-#### Benefits
-- Easy installation for collaborators and users
-- Reproducible environments across systems
-- Professional presentation for papers/releases
-- Easier adoption by research community
-
----
-
-## Items NOT Implemented (User Decision)
-
-The following items from the original roadmap were discussed and decided against:
-
-1. **CI/CD & Automated Testing** - Not needed for current research phase
-2. **Pydantic Configuration Validation** - Current YAML validation is sufficient  
-3. **Hierarchical Configuration System** - Current flat configs work well
-4. **Processor Architecture Refactoring** - Current design is adequate
-5. **Model Factory & Builder Patterns** - Not needed, direct instantiation works
-6. **Data Pipeline Improvements** - Current pipeline is sufficient
-7. **Performance Optimization** - Not a bottleneck currently
-8. **Developer Experience Tools** - Current workflow is efficient
-9. **Comprehensive API Documentation** - Code and configs are self-documenting
-10. **Examples & Tutorials** - Configuration files serve as sufficient examples
-
-These can be revisited in the future if needs change.
-
----
-
-## Implementation Strategy
-
-### Phase 1: Foundation (Weeks 1-4) - ✅ **COMPLETED**
-1. ✅ **Package structure reorganization** - Modular architecture with clear API boundaries
-2. ✅ **Testing infrastructure** - Unit and integration tests for processors, models, data
-3. ✅ **Loss function configuration system** - Flexible loss composition via YAML
-4. ✅ **Callback-based logging system** - Modular, configurable logging
-
-### Phase 2: Remaining Items - 🎯 **SELECTED FOR IMPLEMENTATION**
-1. ✅ **Type hints enhancement** - Add comprehensive type hints to all modules ✅ **COMPLETED**
-2. ⏳ **Distribution & packaging** - PyPI packaging, conda packages, Docker containers
-
-### Phase 3: Items NOT Selected (Skipped by User Decision)
-1. ❌ **CI/CD & Automated Testing** - GitHub Actions, coverage, pre-commit hooks (not needed for now)
-2. ❌ **Configuration schema validation** - Pydantic validation (not needed)
-3. ❌ **Unified configuration system** - Hierarchical configs with inheritance (not needed)
-4. ❌ **Processor architecture refactoring** - Abstract base classes and plugin system (not needed)
-5. ❌ **Model factory patterns** - Builder patterns for model construction (not needed)
-6. ❌ **Data pipeline improvements** - Advanced data loading and transforms (not needed)
-7. ❌ **Performance optimization** - Memory and computation improvements (not needed for now)
-8. ❌ **Developer experience tools** - CLI improvements, debugging utilities (not needed)
-9. ❌ **Comprehensive documentation** - API docs with Sphinx, ADRs (too complex)
-10. ❌ **Examples & tutorials** - Jupyter notebooks, tutorials (configs are sufficient)
-
-### 📊 Progress Summary
-- **Completed**: 7/8 selected items (87.5%)
-- **In Progress**: 0/8 selected items (0%)
-- **Remaining**: 1/8 selected items (12.5%)
-- **Current Focus**: Distribution & packaging (PyPI, conda, Docker)
-
----
-
-## Success Metrics
-
-### Code Quality
-- ✅ Comprehensive test suite for core components
-- ✅ Clean modular architecture with clear separation of concerns
-- ✅ Configuration-driven development approach
-- ✅ Complete type hints coverage across all modules
-
-### Developer Experience  
-- ✅ Fast experimentation with flexible loss and callback configuration
-- ✅ Clear examples through comprehensive configuration files
-- ✅ Type hints for better IDE support and error detection
-- ✅ Automated scripts for code maintenance and consistency
-
-### Maintainability
-- ✅ Loss function architecture with clear separation of concerns
-- ✅ Modular callback system for extensibility
-- ✅ Test suite with equivalence validation
-- ✅ Type hints for safer refactoring and maintenance
-- ⏳ Packaging for distribution (planned)
-
----
-
-## Long-term Vision
-
-The streamlined roadmap focuses NablAFx on becoming a practical, research-oriented framework that:
-
-1. **Enables** rapid experimentation with configuration-driven development
-2. **Maintains** scientific rigor with comprehensive testing
-3. **Supports** reproducible research through proper packaging
-4. **Balances** academic needs with practical software engineering
-
-This focused approach ensures the framework serves its primary purpose: supporting high-quality audio effects modeling research without unnecessary complexity.
+See [README.md](README.md#credits) for acknowledgments of the architectures and libraries used.
