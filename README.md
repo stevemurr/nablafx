@@ -52,47 +52,30 @@ To show your support please consider giving this repo a star :star:. Thanks! :me
 
 ## Installation
 
-### For Research & Experimentation (Recommended)
-
-Clone the repository for full access to training scripts, configurations, and examples:
+NablaFX uses [uv](https://docs.astral.sh/uv/) for environment management:
 
 ```bash
-# Clone the repository
+# Install uv if needed
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Clone and sync
 git clone https://github.com/mcomunita/nablafx.git
 cd nablafx
-
-# Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install NablaFX in editable mode
-pip install -e .
-
-# Install rational-activations (required, installed separately due to dependency conflicts)
-pip install rational-activations==0.2.0 --no-deps
-
-# Copy rational config file
-python -c "
-import urllib.request
-from pathlib import Path
-import rational
-url = 'https://raw.githubusercontent.com/mcomunita/nablafx/master/weights/rationals_config.json'
-target = Path(rational.__file__).parent / 'rationals_config.json'
-urllib.request.urlretrieve(url, target)
-print(f'✅ Config downloaded to {target}')
-"
+uv sync
 ```
 
-### For Quick Evaluation or Using as a Library
+That's it. All dependencies (including `rational-activations` and a CUDA-13
+PyTorch build for native Blackwell / DGX Spark support) are resolved from
+`pyproject.toml`.
 
-Install from PyPI if you want to quickly test NablaFX or use its components in your own projects:
+Run any command inside the project environment with `uv run`:
 
 ```bash
-pip install nablafx
-pip install rational-activations==0.2.0 --no-deps
+uv run python -c "import nablafx; print(nablafx.__version__)"
+uv run pytest tests/test_rational_config.py
 ```
 
-See [INSTALL.md](INSTALL.md) for detailed installation instructions.
+See [INSTALL.md](INSTALL.md) for CUDA-version overrides and troubleshooting.
 
 ## Setup for Training
 
@@ -142,7 +125,7 @@ To make it super easy to start training we prepared shell scripts `scripts/train
 
 ```
 CUDA_VISIBLE_DEVICES=0 \
-python scripts/main.py fit \
+uv run python scripts/main.py fit \
 -c cfg/data/data-param_multidrive-ffuzz_trainval.yaml \
 -c cfg/model/s4-param/model_bb-param_s4-tvf-b8-s32-c16.yaml \
 -c cfg/trainer/trainer_bb.yaml
@@ -156,7 +139,7 @@ We did the same for testing, and prepared a shell script `scripts/test.sh` that 
 
 ```
 CUDA_VISIBLE_DEVICES=0 \
-python scripts/main.py test \
+uv run python scripts/main.py test \
 --config logs/multidrive-ffuzz/S4-TTF/bb_S4-TTF-B8-S32-C16_lr.01_td5_fd5/config.yaml \
 --ckpt_path "logs/multidrive-ffuzz/S4-TTF/bb_S4-TTF-B8-S32-C16_lr.01_td5_fd5/nnlinafx-PARAM/p362csrv/checkpoints/last.ckpt" \
 --trainer.logger.entity mcomunita \

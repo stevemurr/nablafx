@@ -2,9 +2,7 @@ import os
 import torch
 import random
 import auraloss
-import sys
 
-# import pytorch_lightning as pl
 import lightning as pl
 import torchmetrics as tm
 import wandb
@@ -12,11 +10,11 @@ import wandb
 from typing import List, Optional
 from nablafx.utils.plotting import plot_frequency_response_steps
 from nablafx.evaluation.flexible_loss import FlexibleLoss
-from frechet_audio_distance import FrechetAudioDistance
 
-module_path = os.path.abspath(os.path.join(".."))
-if module_path not in sys.path:
-    sys.path.append(module_path)
+# Note: `frechet_audio_distance` (via `laion_clap`) calls `parse_args()` at
+# import time, which clashes with any argv that isn't the CLAP trainer's
+# (pytest, Lightning CLI, etc.). Import it lazily inside the methods that
+# actually need it.
 
 
 class BaseSystem(pl.LightningModule):
@@ -328,6 +326,8 @@ class BaseSystem(pl.LightningModule):
         """
         if self.use_callbacks:
             return  # FAD computation handled by FADComputationCallback
+
+        from frechet_audio_distance import FrechetAudioDistance
 
         print("\nComputing and logging FAD...")
         run_dir = self.logger.experiment.dir

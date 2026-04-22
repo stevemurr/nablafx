@@ -1,5 +1,5 @@
 CUDA_VISIBLE_DEVICES=0 \
-python scripts/main.py test \
+uv run python scripts/main.py test \
 --config logs/multidrive-ffuzz/S4-TTF/bb_S4-TTF-B8-S32-C16_lr.01_td5_fd5/config.yaml \
 --ckpt_path "logs/multidrive-ffuzz/S4-TTF/bb_S4-TTF-B8-S32-C16_lr.01_td5_fd5/nnlinafx-PARAM/p362csrv/checkpoints/last.ckpt" \
 --trainer.logger.entity mcomunita \

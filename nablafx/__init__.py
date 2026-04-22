@@ -10,6 +10,10 @@ This package provides:
 - Core interfaces and model implementations
 """
 
+from . import _rational_patch as _rational_patch
+
+_rational_patch.apply()
+
 # Core classes - available at top level for convenience
 from .core import (
     # Models

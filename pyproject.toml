@@ -3,7 +3,7 @@ name = "nablafx"
 version = "1.0.0"
 description = "Differentiable black-box and gray-box audio effects modeling framework"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {file = "LICENSE"}
 
 authors = [
@@ -33,7 +33,9 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Multimedia :: Sound/Audio :: Analysis",
     "Topic :: Software Development :: Libraries :: Python Modules",
@@ -42,23 +44,21 @@ classifiers = [
 dependencies = [
     "auraloss>=0.4.0",
     "einops>=0.8.0",
-    "frechet_audio_distance",
+    "frechet-audio-distance",
     "jsonargparse[signatures]>=4.27.7",
-    "lightning>=2.3.2",
+    "lightning>=2.4",
     "lightning-utilities>=0.11.3",
-    "matplotlib>=3.9.1",
+    "matplotlib>=3.9",
     "natsort",
-    "numpy>=1.26.4,<2.0",
-    "scipy>=1.13.1",
-    "torch>=2.2.2",
-    "torchaudio>=2.2.2",
-    "torchmetrics>=1.4.0",
-    "torchvision>=0.17.2",
-    "typing-extensions>=4.12.2",
-    "wandb>=0.17.4",
-    # Note: rational-activations must be installed separately with --no-deps
-    # It declares torch==1.7.1 but works fine with torch>=2.2.2
-    # See INSTALL.md for installation instructions
+    "numpy>=1.26,<3",
+    "scipy>=1.13",
+    "torch>=2.8",
+    "torchaudio>=2.8",
+    "torchmetrics>=1.4",
+    "torchvision>=0.23",
+    "typing-extensions>=4.12",
+    "wandb>=0.17",
+    "rational-activations==0.2.0",
 ]
 
 
@@ -68,6 +68,13 @@ build-backend = "setuptools.build_meta"
 
 
 [project.optional-dependencies]
+docs = [
+    "sphinx>=6.0",
+    "sphinx-rtd-theme>=1.2",
+]
+
+# PEP 735 groups — installed by default with `uv sync`, not shipped in the wheel.
+[dependency-groups]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -75,11 +82,6 @@ dev = [
     "isort>=5.12",
     "flake8>=6.0",
     "mypy>=1.0",
-]
-
-docs = [
-    "sphinx>=6.0",
-    "sphinx-rtd-theme>=1.2",
 ]
 
 [project.urls]
@@ -93,29 +95,48 @@ Repository = "https://github.com/mcomunita/nablafx.git"
 [tool.setuptools]
 include-package-data = true
 
-# Automatically discover all packages under nablafx/
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["nablafx*"]
 exclude = ["tests*", "benchmarks*", "scripts*", "docs*"]
 
 [tool.setuptools.package-data]
-nablafx = ["py.typed"]
+nablafx = ["py.typed", "rationals_config.json"]
 
-# Include weights directory at root level
-[tool.setuptools.data-files]
-"share/nablafx/weights" = ["weights/*.pt", "weights/*.json"]
+# --- uv-specific configuration -------------------------------------------------
+#
+# rational-activations 0.2.0 declares `torch==1.7.1` in its metadata, but the
+# wheel is pure-Python and works with any modern torch. We override that pin
+# globally so uv's resolver doesn't try to pull torch 1.7.1.
+#
+# torch/torchaudio/torchvision are pulled from the PyTorch CUDA 13 wheel index
+# for native Blackwell (sm_121) / CUDA 13 support (DGX Spark).
+#
+[tool.uv]
+override-dependencies = [
+    "torch>=2.8",
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }
+torchaudio = { index = "pytorch-cu130" }
+torchvision = { index = "pytorch-cu130" }
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
 
 [tool.black]
 line-length = 120
-target-version = ['py39']
+target-version = ['py310']
 
 [tool.isort]
 profile = "black"
 line_length = 120
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false

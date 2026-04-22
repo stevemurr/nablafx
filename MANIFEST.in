@@ -10,10 +10,8 @@ include pyproject.toml
 # Include type information
 include nablafx/py.typed
 
-# Include weights - these are needed for rational-activations config
-include weights/*.pt
-include weights/*.json
-graft weights
+# Rational-activations init-weights config (extended version shipped inside the package)
+include nablafx/rationals_config.json
 
 # Include configuration examples (optional - users can get from repo)
 # recursive-include cfg *.yaml

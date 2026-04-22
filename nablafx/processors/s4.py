@@ -1,14 +1,7 @@
-import os
 import torch
 from einops import rearrange
 from torch import Tensor
 from typing import Optional
-
-import sys
-
-module_path = os.path.abspath(os.path.join(".."))
-if module_path not in sys.path:
-    sys.path.append(module_path)
 
 from .components import MLP, TFiLM, TinyTFiLM, TVFiLMCond
 from .blocks import TCNCondBlock, S4CondBlock

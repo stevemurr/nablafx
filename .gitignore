@@ -3,6 +3,7 @@ __pycache__
 .venv
 .DS_Store
 !.gitignore
+!.python-version
 
 checkpoints_fad
 data/*
