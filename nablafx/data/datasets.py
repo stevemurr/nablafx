@@ -3,10 +3,17 @@ import sys
 import glob
 import torch
 import torchaudio
+import soundfile as sf
 import numpy as np
 from typing import List, Tuple, Optional, Dict, Any
 
 from natsort import natsorted
+
+
+def _audio_num_frames(path: str) -> int:
+    # torchaudio.info was removed in torchaudio >= 2.8; soundfile is
+    # already a transitive dep and gives us frame counts cheaply.
+    return sf.info(path).frames
 
 
 # -----------------------------------------------------------------------------
@@ -60,8 +67,7 @@ class PluginDataset(torch.utils.data.Dataset):
             print(ifile)
             print(tfile)
 
-            md = torchaudio.info(tfile)
-            num_frames = md.num_frames  # num samples
+            num_frames = _audio_num_frames(tfile)
             self.num_frames += num_frames
 
             if self.preload:
@@ -211,7 +217,7 @@ class ParametricPluginDataset(torch.utils.data.Dataset):
         # loop over input files
         for iidx, ifile in enumerate(self.input_files):
             print(ifile)
-            imd = torchaudio.info(ifile)
+            imd_frames = _audio_num_frames(ifile)
 
             # select corresponding target files
             ifilename = os.path.basename(ifile)[:-4]
@@ -220,9 +226,9 @@ class ParametricPluginDataset(torch.utils.data.Dataset):
 
             for tidx, tfile in enumerate(target_files):
                 print(tfile)
-                tmd = torchaudio.info(tfile)
+                tmd_frames = _audio_num_frames(tfile)
 
-                num_frames = int(np.min([imd.num_frames, tmd.num_frames]))
+                num_frames = int(np.min([imd_frames, tmd_frames]))
                 self.num_frames += num_frames
 
                 # extract params tensor from filename

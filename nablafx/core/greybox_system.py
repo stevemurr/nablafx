@@ -211,7 +211,7 @@ class GreyBoxSystem(BaseSystem):
             eps=1e-8,
         )
 
-        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=20, verbose=True)
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=20)
 
         return [optimizer], [{"scheduler": lr_scheduler, "monitor": "loss/val/tot", "interval": "epoch", "frequency": 1}]
 

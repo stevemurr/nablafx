@@ -82,8 +82,9 @@ class BaseSystem(pl.LightningModule):
         raise NotImplementedError
 
     def on_train_start(self):
-        # log gradients (always enabled)
-        wandb.watch(self.model, log_freq=100)
+        # log gradients (only if wandb is actually initialized)
+        if wandb.run is not None:
+            wandb.watch(self.model, log_freq=100)
         # Frequency response logging handled by callbacks if use_callbacks=True
         if not self.use_callbacks:
             pass  # self.log_frequency_response() # atm needs too much memory
@@ -114,7 +115,7 @@ class BaseSystem(pl.LightningModule):
             eps=1e-8,
         )
 
-        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=20, verbose=True)
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=20)
 
         return [optimizer], [{"scheduler": lr_scheduler, "monitor": "loss/val/tot", "interval": "epoch", "frequency": 1}]
 
