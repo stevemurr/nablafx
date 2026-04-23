@@ -12,9 +12,11 @@ This package provides:
 
 from . import _npp_preload as _npp_preload
 from . import _rational_patch as _rational_patch
+from . import _resolvers as _resolvers
 
 _npp_preload.apply()
 _rational_patch.apply()
+_resolvers.apply()
 
 # Core classes - available at top level for convenience
 from .core import (
