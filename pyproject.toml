@@ -45,7 +45,6 @@ dependencies = [
     "auraloss>=0.4.0",
     "einops>=0.8.0",
     "frechet-audio-distance",
-    "jsonargparse[signatures]>=4.27.7",
     "lightning>=2.4",
     "lightning-utilities>=0.11.3",
     "matplotlib>=3.9",
