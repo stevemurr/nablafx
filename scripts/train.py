@@ -5,17 +5,20 @@ Usage:
     uv run python scripts/train.py data=<data> model=<model> [mode=fit|test|validate] [ckpt_path=...]
 
 Examples (fit):
-    uv run python scripts/train.py data=610b_trainval model=tcn/model_bb_tcn-45-s-16
+    uv run python scripts/train.py data=1176LN-Limiter_trainval model=tcn/model_bb_tcn-45-s-16
 
 Example (test): load the resolved config of a trained run, override data, supply ckpt.
     uv run python scripts/train.py \\
       --config-path ../outputs/2026-04-22/17-00-00/.hydra --config-name config \\
       mode=test \\
-      data=610b_test \\
+      data=1176LN-Limiter_test \\
       ckpt_path=outputs/2026-04-22/17-00-00/logs/version_0/checkpoints/last.ckpt
 
+Rebase dataset location for a run (see `dataset_root` in conf/config.yaml):
+    uv run python scripts/train.py data=1176LN-Limiter_trainval model=tcn/model_bb_tcn-45-s-16 dataset_root=/shared/datasets
+
 Multirun sweep:
-    uv run python scripts/train.py -m data=610b_trainval model=tcn/bb_tcn-45-s-16,lstm/bb_lstm-32
+    uv run python scripts/train.py -m data=1176LN-Limiter_trainval model=tcn/bb_tcn-45-s-16,lstm/bb_lstm-32
 
 See conf/ for the config tree. Callbacks are composed in conf/trainer/*.yaml
 via Hydra's defaults list — toggle from the CLI with `~trainer.callbacks.<role>`
