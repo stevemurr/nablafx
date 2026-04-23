@@ -1,24 +1,26 @@
 """
 Hydra entrypoint for nablafx fit / validate / test.
 
-Usage:
-    uv run python scripts/train.py data=<data> model=<model> [mode=fit|test|validate] [ckpt_path=...]
+Installed as a console script via `pyproject.toml:[project.scripts]`, so the
+canonical invocation is:
+
+    uv run nablafx data=<data> model=<model> [mode=fit|test|validate] [ckpt_path=...]
 
 Examples (fit):
-    uv run python scripts/train.py data=1176LN-Limiter_trainval model=tcn/model_bb_tcn-45-s-16
+    uv run nablafx data=1176LN-Limiter_trainval model=tcn/model_bb_tcn-45-s-16
 
 Example (test): load the resolved config of a trained run, override data, supply ckpt.
-    uv run python scripts/train.py \\
+    uv run nablafx \\
       --config-path ../outputs/2026-04-22/17-00-00/.hydra --config-name config \\
       mode=test \\
       data=1176LN-Limiter_test \\
       ckpt_path=outputs/2026-04-22/17-00-00/logs/version_0/checkpoints/last.ckpt
 
 Rebase dataset location for a run (see `dataset_root` in conf/config.yaml):
-    uv run python scripts/train.py data=1176LN-Limiter_trainval model=tcn/model_bb_tcn-45-s-16 dataset_root=/shared/datasets
+    uv run nablafx data=1176LN-Limiter_trainval model=tcn/model_bb_tcn-45-s-16 dataset_root=/shared/datasets
 
 Multirun sweep:
-    uv run python scripts/train.py -m data=1176LN-Limiter_trainval model=tcn/bb_tcn-45-s-16,lstm/bb_lstm-32
+    uv run nablafx -m data=1176LN-Limiter_trainval model=tcn/bb_tcn-45-s-16,lstm/bb_lstm-32
 
 See conf/ for the config tree. Callbacks are composed in conf/trainer/*.yaml
 via Hydra's defaults list — toggle from the CLI with `~trainer.callbacks.<role>`
@@ -28,6 +30,7 @@ or `+trainer/callbacks@trainer.callbacks.<role>=<name>`.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import hydra
 import torch
@@ -37,8 +40,12 @@ from omegaconf import DictConfig, OmegaConf
 
 import nablafx  # noqa: F401  (applies rational-activations config patch at import)
 
+# Absolute path keeps Hydra from treating the config dir as a Python package
+# when this module is invoked through the installed `nablafx` console script.
+_CONF_DIR = str(Path(__file__).resolve().parent.parent / "conf")
 
-@hydra.main(version_base="1.3", config_path="../conf", config_name="config")
+
+@hydra.main(version_base="1.3", config_path=_CONF_DIR, config_name="config")
 def main(cfg: DictConfig) -> None:
     seed_everything(42, workers=True)
     torch.set_float32_matmul_precision("high")

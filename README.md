@@ -102,7 +102,7 @@ To use Weights & Biases instead:
 
 ```bash
 wandb login
-uv run python scripts/train.py ... trainer/logger@trainer.logger=wandb \
+uv run nablafx ... trainer/logger@trainer.logger=wandb \
   trainer.logger.entity=YOUR_USER trainer.logger.name=my-run
 ```
 
@@ -132,7 +132,7 @@ conf/
 Pick one of each from the CLI:
 
 ```bash
-uv run python scripts/train.py \
+uv run nablafx \
   data=data_ampeg-optocomp_trainval \
   model=s4/model_bb_s4-b4-s4-c16 \
   trainer=bb
@@ -142,7 +142,7 @@ Override any field by name (use `+key=value` when the key isn't already in
 the config schema):
 
 ```bash
-uv run python scripts/train.py \
+uv run nablafx \
   data=data_klon-centaur_trainval \
   model=tcn/model_bb_tcn-45-s-16 \
   trainer=bb \
@@ -164,7 +164,7 @@ Toggle individual trainer callbacks:
 Sweeps run with `-m` (Cartesian product):
 
 ```bash
-uv run python scripts/train.py -m \
+uv run nablafx -m \
   data=data_klon-centaur_trainval,data_ibanez-ts9_trainval \
   model=tcn/model_bb_tcn-45-s-16,lstm/model_bb_lstm-32 \
   model.lr=1e-3,1e-4
@@ -174,13 +174,13 @@ Example wrappers: `scripts/train_bb.sh`, `scripts/train_gb.sh`.
 
 ## Test
 
-`scripts/train.py` dispatches on `mode={fit,validate,test}`. For
+The `nablafx` entrypoint dispatches on `mode={fit,validate,test}`. For
 evaluation, reconstruct the model via Hydra and pass the checkpoint in:
 
 ```bash
-uv run python scripts/train.py \
+uv run nablafx \
   mode=test \
-  data=610b_test \
+  data=610B-MicPreamp_test \
   model=tcn/model_bb_tcn-45-s-16 \
   trainer=bb \
   ckpt_path=outputs/2026-04-22/17-00-00/checkpoints/last.ckpt
@@ -191,7 +191,7 @@ uv run python scripts/train.py \
 ```bash
 CKPT=outputs/.../checkpoints/last.ckpt \
 MODEL=tcn/model_bb_tcn-45-s-16 \
-TEST_DATA=610b_test \
+TEST_DATA=610B-MicPreamp_test \
 bash scripts/test.sh
 ```
 

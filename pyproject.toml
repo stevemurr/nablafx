@@ -63,6 +63,9 @@ dependencies = [
 ]
 
 
+[project.scripts]
+nablafx = "nablafx.__main__:main"
+
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
@@ -108,7 +111,10 @@ nablafx = ["py.typed", "rationals_config.json"]
 #
 # rational-activations 0.2.0 declares `torch==1.7.1` in its metadata, but the
 # wheel is pure-Python and works with any modern torch. We override that pin
-# globally so uv's resolver doesn't try to pull torch 1.7.1.
+# globally so uv's resolver doesn't try to pull torch 1.7.1. We're stuck on
+# 0.2.0 because 0.2.1 dropped the universal `py3-none-any` wheel in favor of
+# cp36/37/38/39-only C-extension wheels with no sdist, which don't cover
+# Python >= 3.10.
 #
 # torch/torchaudio/torchvision are pulled from the PyTorch CUDA 13 wheel index
 # for native Blackwell (sm_121) / CUDA 13 support (DGX Spark).

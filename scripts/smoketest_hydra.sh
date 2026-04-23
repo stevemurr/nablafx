@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # End-to-end Hydra smoke test — one run per architecture family against
-# 610B-MicPreamp. Each run trains for a few steps to confirm the Hydra
-# entrypoint, config composition, instantiation, and GPU placement all work.
+# the 610B-MicPreamp trainval set. Each run trains for a few steps to confirm
+# the Hydra entrypoint, config composition, instantiation, and GPU placement
+# all work.
 #
 # Usage:
 #   uv run bash scripts/smoketest_hydra.sh
@@ -15,7 +16,7 @@ cd "$(dirname "$0")/.."
 # Shared overrides for all cases: skip validation (legacy wandb-only path) and
 # strip callbacks that need training to converge or that write to wandb.
 COMMON=(
-  data=610b_trainval
+  data=610B-MicPreamp_trainval
   trainer=bb
   trainer.max_steps=5
   trainer.benchmark=false
@@ -31,7 +32,7 @@ run_one() {
   local model="$2"
   echo ""
   echo "========== ${label} =========="
-  uv run python scripts/train.py "${COMMON[@]}" "model=${model}"
+  uv run nablafx "${COMMON[@]}" "model=${model}"
 }
 
 run_one "TCN-tanh"     "tcn/model_bb_tcn-45-s-16"
@@ -40,7 +41,7 @@ run_one "S4"           "s4/model_bb_s4-b4-s4-c16"
 
 echo ""
 echo "========== multirun sanity =========="
-uv run python scripts/train.py -m \
+uv run nablafx -m \
   "${COMMON[@]}" \
   model=tcn/model_bb_tcn-45-s-16,lstm/model_bb_lstm-32
 
