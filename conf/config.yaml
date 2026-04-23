@@ -9,6 +9,10 @@ defaults:
 mode: fit
 ckpt_path: null
 
+# Root directory for datasets. Data configs reference this via ${dataset_root}.
+# Override on the CLI, e.g. `dataset_root=/shared/datasets`.
+dataset_root: /home/murr/jupyter-redux/datasets
+
 hydra:
   job:
     chdir: false
