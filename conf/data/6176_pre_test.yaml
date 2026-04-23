@@ -1,0 +1,10 @@
+_target_: nablafx.data.DryWetFilesPluginDataModule
+root_dir_dry: /home/murr/jupyter-redux/datasets/6176_pre/DRY/test
+root_dir_wet: /home/murr/jupyter-redux/datasets/6176_pre/610B-MicPreamp/test/G10dB_L6_ILine_H0dB_L0dB
+data_to_use: 1.0
+trainval_split: 0.85  # unused for test, datamodule requires it
+sample_length: 44100  # 1 s
+sample_rate: 44100
+preload: false
+batch_size: 8
+num_workers: 2
