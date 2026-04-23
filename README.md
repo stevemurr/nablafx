@@ -93,13 +93,18 @@ ln -s /path/to/TONETWIST-AFX-DATASET/
 
 ### Logs
 
-NablAFx is setup to use _Weights&Biases_ for logging so, create an account and `wandb login` from terminal.
+Runs land in `outputs/<date>/<time>/` (or `multirun/<date>/<time>/<idx>/` for
+sweeps) — Hydra creates these automatically and dumps the resolved config
+under `.hydra/config.yaml` for each run. CSV logging is on by default and
+writes to `logs/` inside the run directory.
+
+To use Weights & Biases instead:
 
 ```bash
-mkdir logs
+wandb login
+uv run python scripts/train.py ... trainer/logger@trainer.logger=wandb \
+  trainer.logger.entity=YOUR_USER trainer.logger.name=my-run
 ```
-
-Please note that if you want to save the logs to a specific subfolder, this needs to be created in advance (see `cfg/trainer/trainer_bb.yaml` for an example).
 
 ### Frechét Audio Distance checkpoints
 
@@ -113,49 +118,64 @@ The first time you will compute FAD (which is at test time) the checkpoints are 
 
 ## Train
 
-We use Lightning CLI to configure the training using separate `.yaml` files for data, model and trainer configurations, see examples in:
+Training is driven by [Hydra](https://hydra.cc/). Configs live in `conf/`,
+organised into groups:
 
 ```
-cfg/data
-cfg/model
-cfg/trainer
+conf/
+  config.yaml           # top-level defaults + Hydra settings
+  data/*.yaml           # data modules (one per dataset/pedal)
+  model/<arch>/*.yaml   # model variants grouped by architecture
+  trainer/              # trainers + callback / logger subgroups
 ```
 
-To make it super easy to start training we prepared shell scripts `scripts/train_bb.sh` or `scripts/train_gb.sh`, which look like this:
+Pick one of each from the CLI:
 
-```
-CUDA_VISIBLE_DEVICES=0 \
-uv run python scripts/main.py fit \
--c cfg/data/data-param_multidrive-ffuzz_trainval.yaml \
--c cfg/model/s4-param/model_bb-param_s4-tvf-b8-s32-c16.yaml \
--c cfg/trainer/trainer_bb.yaml
+```bash
+uv run python scripts/train.py \
+  data=data_ampeg-optocomp_trainval \
+  model=s4/model_bb_s4-b4-s4-c16 \
+  trainer=bb
 ```
 
-so that you just have to change the config paths to train your own model.
+Override any field by name (use `+key=value` when the key isn't already in
+the config schema):
+
+```bash
+uv run python scripts/train.py \
+  data=data_klon-centaur_trainval \
+  model=tcn/model_bb_tcn-45-s-16 \
+  trainer=bb \
+  model.lr=1e-4 \
+  trainer.max_steps=50000
+```
+
+Toggle individual trainer callbacks:
+
+```bash
+# disable one:
+  '~trainer.callbacks.early_stopping'
+# enable an opt-in:
+  '+trainer/callbacks@trainer.callbacks.fad=fad'
+# swap logger to W&B:
+  trainer/logger@trainer.logger=wandb trainer.logger.entity=YOUR_USER
+```
+
+Sweeps run with `-m` (Cartesian product):
+
+```bash
+uv run python scripts/train.py -m \
+  data=data_klon-centaur_trainval,data_ibanez-ts9_trainval \
+  model=tcn/model_bb_tcn-45-s-16,lstm/model_bb_lstm-32 \
+  model.lr=1e-3,1e-4
+```
+
+Example wrappers: `scripts/train_bb.sh`, `scripts/train_gb.sh`.
 
 ## Test
 
-We did the same for testing, and prepared a shell script `scripts/test.sh` that looks like this:
-
-```
-CUDA_VISIBLE_DEVICES=0 \
-uv run python scripts/main.py test \
---config logs/multidrive-ffuzz/S4-TTF/bb_S4-TTF-B8-S32-C16_lr.01_td5_fd5/config.yaml \
---ckpt_path "logs/multidrive-ffuzz/S4-TTF/bb_S4-TTF-B8-S32-C16_lr.01_td5_fd5/nnlinafx-PARAM/p362csrv/checkpoints/last.ckpt" \
---trainer.logger.entity mcomunita \
---trainer.logger.project nablafx \
---trainer.logger.save_dir logs/multidrive-ffuzz/TEST/bb_S4-TTF-B8-S32-C16_lr.01_td5_fd5 \
---trainer.logger.name bb_S4-TTF-B8-S32-C16_lr.01_td5_fd5 \
---trainer.logger.group Multidrive-FFuzz_TEST \
---trainer.logger.tags "['Multidrive-FFuzz', 'TEST']" \
---trainer.accelerator gpu \
---trainer.strategy auto \
---trainer.devices=1 \
---config cfg/data/data-param_multidrive-ffuzz_test.yaml
-# --data.sample_length 480000
-```
-
-While it looks complicated, it is just the case of replacing the paths to: model configuration, checkpoint, logging folder. 
+The `test` subcommand has not yet been ported from the old Lightning CLI
+entrypoint. See `scripts/test.sh` for the current workaround and tracking.
 
 ## Params, FLOPs, MACs and Real-time factor:
 
