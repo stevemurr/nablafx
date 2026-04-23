@@ -59,6 +59,9 @@ dependencies = [
     "wandb>=0.17",
     "rational-activations==0.2.0",
     "torchcodec>=0.11.1",
+    # NPP (image primitives) isn't bundled by the torch cu130 wheel but is
+    # linked at load time by torchcodec. Only Linux wheels exist.
+    "nvidia-npp>=13.1; sys_platform == 'linux'",
     "hydra-core>=1.3",
 ]
 
