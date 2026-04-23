@@ -3,7 +3,7 @@ name = "nablafx"
 version = "1.0.0"
 description = "Differentiable black-box and gray-box audio effects modeling framework"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 license = {file = "LICENSE"}
 
 authors = [
