@@ -1,0 +1,7 @@
+_target_: nablafx.callbacks.AudioChainLoggingCallback
+log_on_train_start: false
+log_on_validation: true
+log_on_test: true
+log_test_batches: 5
+max_samples_per_batch: 3
+sample_rate: 48000

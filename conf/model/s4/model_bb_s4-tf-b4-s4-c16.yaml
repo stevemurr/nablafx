@@ -1,0 +1,31 @@
+_target_: nablafx.BlackBoxSystem
+lr: 0.01
+use_callbacks: true
+log_media_every_n_steps: 3000
+model:
+  _target_: nablafx.BlackBoxModel
+  processor:
+    _target_: nablafx.processors.s4.S4
+    num_inputs: 1
+    num_outputs: 1
+    num_controls: 0
+    num_blocks: 4
+    s4_state_dim: 4
+    channel_width: 16
+    batchnorm: false
+    residual: true
+    direct_path: false
+    cond_type: tfilm
+    cond_block_size: 128
+    cond_num_layers: 1
+    act_type: tanh
+    s4_learning_rate: 0.01
+loss:
+  _target_: nablafx.evaluation.FlexibleLoss
+  losses:
+  - name: l1_loss
+    weight: 0.5
+    alias: l1
+  - name: mrstft_loss
+    weight: 0.5
+    alias: mrstft

@@ -1,0 +1,3 @@
+_target_: lightning.pytorch.callbacks.EarlyStopping
+monitor: loss/val/tot
+patience: 50

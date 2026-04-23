@@ -1,0 +1,6 @@
+# Opt-in: add with `+trainer/callbacks@trainer.callbacks.freq_response=freq_response`
+_target_: nablafx.callbacks.FrequencyResponseCallback
+log_on_train_start: true
+log_on_train_end: false
+log_on_test_end: true
+log_every_n_epochs: null

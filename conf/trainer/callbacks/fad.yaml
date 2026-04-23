@@ -1,0 +1,20 @@
+# Opt-in: add with `+trainer/callbacks@trainer.callbacks.fad=fad`.
+# Requires FAD checkpoints — see README "Frechét Audio Distance checkpoints".
+_target_: nablafx.callbacks.FADComputationCallback
+compute_on_train_end: false
+compute_on_test_end: true
+compute_every_n_epochs: null
+checkpoint_dir: checkpoints_fad
+prefix: fad
+fad_metrics:
+  - name: fad_vggish_metric
+    alias: vggish
+    params:
+      use_pca: false
+  - name: fad_pann_metric
+    alias: pann
+  - name: fad_clap_metric
+    alias: clap
+    params:
+      submodel_name: 630k-audioset
+      enable_fusion: false

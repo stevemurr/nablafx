@@ -1,0 +1,29 @@
+# Black-box trainer. Callbacks are composed via the `defaults` list so they
+# can be toggled from the CLI:
+#   - disable a default:  `~trainer.callbacks.early_stopping`
+#   - enable an opt-in:   `+trainer/callbacks@trainer.callbacks.fad=fad`
+#   - swap the logger:    `trainer/logger@trainer.logger=wandb`
+defaults:
+  - /trainer/logger@logger: csv
+  - /trainer/callbacks@callbacks.audio: audio
+  - /trainer/callbacks@callbacks.metrics: metrics
+  - /trainer/callbacks@callbacks.checkpoint: checkpoint
+  - /trainer/callbacks@callbacks.early_stopping: early_stopping
+  - /trainer/callbacks@callbacks.lr_monitor: lr_monitor
+  - /trainer/callbacks@callbacks.model_summary: model_summary
+  - _self_
+
+_target_: lightning.Trainer
+accelerator: gpu
+devices: 1
+gradient_clip_val: 10.0
+gradient_clip_algorithm: value
+max_steps: 15000
+num_sanity_val_steps: 2
+check_val_every_n_epoch: 1
+log_every_n_steps: 100
+sync_batchnorm: true
+enable_model_summary: true
+enable_checkpointing: true
+deterministic: null
+benchmark: true

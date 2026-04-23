@@ -1,0 +1,6 @@
+_target_: nablafx.callbacks.ParameterLoggingCallback
+log_on_train_start: true
+log_on_validation: true
+log_on_test: true
+log_test_batches: 10
+max_samples_per_batch: 5

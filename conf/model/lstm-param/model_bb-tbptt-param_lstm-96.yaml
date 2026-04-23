@@ -1,0 +1,27 @@
+_target_: nablafx.BlackBoxSystemWithTBPTT
+lr: 0.001
+log_media_every_n_steps: 90000
+step_num_samples: 4800
+model:
+  _target_: nablafx.BlackBoxModel
+  processor:
+    _target_: nablafx.processors.lstm.LSTM
+    num_inputs: 1
+    num_outputs: 1
+    num_controls: 1
+    hidden_size: 96
+    num_layers: 1
+    residual: false
+    direct_path: false
+    cond_type: fixed
+    cond_block_size: 128
+    cond_num_layers: 1
+loss:
+  _target_: nablafx.evaluation.FlexibleLoss
+  losses:
+  - name: l1_loss
+    weight: 0.5
+    alias: l1
+  - name: mrstft_loss
+    weight: 0.5
+    alias: mrstft

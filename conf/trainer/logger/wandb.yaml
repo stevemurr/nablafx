@@ -1,0 +1,9 @@
+_target_: lightning.pytorch.loggers.WandbLogger
+project: nablafx
+save_dir: ${hydra:runtime.output_dir}
+# override these at the CLI:
+#   trainer/logger=wandb trainer.logger.entity=YOUR_USER trainer.logger.name=run-name
+entity: null
+name: null
+group: null
+tags: []

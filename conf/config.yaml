@@ -1,0 +1,14 @@
+defaults:
+  - _self_
+  - data: ???
+  - model: ???
+  - trainer: bb
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}

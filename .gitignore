@@ -9,6 +9,8 @@ checkpoints_fad
 data/*
 logs/*
 wandb
+outputs
+multirun
 
 # Build artifacts
 dist/

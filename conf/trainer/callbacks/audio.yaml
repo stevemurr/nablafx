@@ -1,0 +1,6 @@
+_target_: nablafx.callbacks.AudioLoggingCallback
+log_every_n_steps: 3000
+sample_rate: 48000
+max_samples_per_batch: 3
+log_test_batches: 10
+log_input_target_once: true
