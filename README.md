@@ -174,8 +174,29 @@ Example wrappers: `scripts/train_bb.sh`, `scripts/train_gb.sh`.
 
 ## Test
 
-The `test` subcommand has not yet been ported from the old Lightning CLI
-entrypoint. See `scripts/test.sh` for the current workaround and tracking.
+`scripts/train.py` dispatches on `mode={fit,validate,test}`. For
+evaluation, reconstruct the model via Hydra and pass the checkpoint in:
+
+```bash
+uv run python scripts/train.py \
+  mode=test \
+  data=610b_test \
+  model=tcn/model_bb_tcn-45-s-16 \
+  trainer=bb \
+  ckpt_path=outputs/2026-04-22/17-00-00/checkpoints/last.ckpt
+```
+
+`scripts/test.sh` wraps the same invocation with env vars:
+
+```bash
+CKPT=outputs/.../checkpoints/last.ckpt \
+MODEL=tcn/model_bb_tcn-45-s-16 \
+TEST_DATA=610b_test \
+bash scripts/test.sh
+```
+
+The same mechanism handles `mode=validate` (also requires `ckpt_path=`). For
+`mode=fit`, `ckpt_path=` is optional and resumes training from that state.
 
 ## Params, FLOPs, MACs and Real-time factor:
 
