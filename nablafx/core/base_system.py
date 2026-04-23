@@ -10,6 +10,7 @@ import wandb
 from typing import List, Optional
 from nablafx.utils.plotting import plot_frequency_response_steps
 from nablafx.evaluation.flexible_loss import FlexibleLoss
+from nablafx._logger_utils import is_wandb_logger as _is_wandb_logger
 
 # Note: `frechet_audio_distance` (via `laion_clap`) calls `parse_args()` at
 # import time, which clashes with any argv that isn't the CLAP trainer's
@@ -257,6 +258,8 @@ class BaseSystem(pl.LightningModule):
         """
         if self.use_callbacks:
             return  # Audio logging handled by AudioLoggingCallback
+        if not _is_wandb_logger(self.logger):
+            return  # legacy path is wandb-only
 
         input, target, pred = input.detach().cpu(), target.detach().cpu(), pred.detach().cpu()
 
@@ -311,6 +314,8 @@ class BaseSystem(pl.LightningModule):
         """Log frequency response plot. No-op if using callbacks."""
         if self.use_callbacks:
             return  # Frequency response handled by FrequencyResponseCallback
+        if not _is_wandb_logger(self.logger):
+            return  # legacy path is wandb-only
 
         print("\nLogging frequency response...")
         self.model.reset_states()
@@ -327,6 +332,8 @@ class BaseSystem(pl.LightningModule):
         """
         if self.use_callbacks:
             return  # FAD computation handled by FADComputationCallback
+        if not _is_wandb_logger(self.logger):
+            return  # legacy path is wandb-only (uses self.logger.experiment.dir/.log)
 
         from frechet_audio_distance import FrechetAudioDistance
 

@@ -4,6 +4,11 @@ defaults:
   - model: ???
   - trainer: bb
 
+# One of: fit | validate | test. Defaults to fit.
+# `ckpt_path` is required for validate / test; optional for fit (to resume).
+mode: fit
+ckpt_path: null
+
 hydra:
   job:
     chdir: false

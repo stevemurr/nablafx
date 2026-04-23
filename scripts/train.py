@@ -1,12 +1,21 @@
 """
-Hydra entrypoint for nablafx training.
+Hydra entrypoint for nablafx fit / validate / test.
 
 Usage:
-    uv run python scripts/train.py data=<data> model=<model> [trainer=<trainer>] [overrides...]
+    uv run python scripts/train.py data=<data> model=<model> [mode=fit|test|validate] [ckpt_path=...]
 
-Examples:
+Examples (fit):
     uv run python scripts/train.py data=610b_trainval model=tcn/model_bb_tcn-45-s-16
-    uv run python scripts/train.py -m data=610b_trainval model=tcn/model_bb_tcn-45-s-16,lstm/model_bb_lstm-32
+
+Example (test): load the resolved config of a trained run, override data, supply ckpt.
+    uv run python scripts/train.py \\
+      --config-path ../outputs/2026-04-22/17-00-00/.hydra --config-name config \\
+      mode=test \\
+      data=610b_test \\
+      ckpt_path=outputs/2026-04-22/17-00-00/logs/version_0/checkpoints/last.ckpt
+
+Multirun sweep:
+    uv run python scripts/train.py -m data=610b_trainval model=tcn/bb_tcn-45-s-16,lstm/bb_lstm-32
 
 See conf/ for the config tree. Callbacks are composed in conf/trainer/*.yaml
 via Hydra's defaults list — toggle from the CLI with `~trainer.callbacks.<role>`
@@ -43,12 +52,26 @@ def main(cfg: DictConfig) -> None:
     logger_spec = trainer_cfg.pop("logger", None)
     target = trainer_cfg.pop("_target_")
 
-    callbacks = [instantiate(c) for c in callback_specs.values()]
-    logger = instantiate(logger_spec) if logger_spec else None
+    callbacks = [instantiate(c, _convert_="all") for c in callback_specs.values()]
+    logger = instantiate(logger_spec, _convert_="all") if logger_spec else None
 
     trainer = hydra.utils.get_class(target)(callbacks=callbacks, logger=logger, **trainer_cfg)
 
-    trainer.fit(system, datamodule=datamodule)
+    mode = cfg.get("mode", "fit")
+    ckpt_path = cfg.get("ckpt_path", None)
+
+    if mode == "fit":
+        trainer.fit(system, datamodule=datamodule, ckpt_path=ckpt_path)
+    elif mode == "validate":
+        if not ckpt_path:
+            raise ValueError("mode=validate requires ckpt_path=<path>")
+        trainer.validate(system, datamodule=datamodule, ckpt_path=ckpt_path)
+    elif mode == "test":
+        if not ckpt_path:
+            raise ValueError("mode=test requires ckpt_path=<path>")
+        trainer.test(system, datamodule=datamodule, ckpt_path=ckpt_path)
+    else:
+        raise ValueError(f"unknown mode {mode!r}; expected fit | validate | test")
 
 
 if __name__ == "__main__":

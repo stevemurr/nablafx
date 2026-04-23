@@ -154,8 +154,9 @@ class AudioLoggingCallback(Callback):
         mode: str,
     ) -> None:
         """Log audio samples to wandb."""
-        if not hasattr(trainer.logger, "experiment"):
-            return  # Skip if no wandb logger
+        from nablafx._logger_utils import is_wandb_logger
+        if not is_wandb_logger(trainer.logger):
+            return  # This callback only supports WandbLogger.
 
         num_samples = min(len(input_audio), self.max_samples_per_batch)
 

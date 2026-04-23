@@ -132,8 +132,9 @@ class AudioChainLoggingCallback(Callback):
         """
         Log audio output at each block in the processing chain.
         """
-        if not hasattr(trainer.logger, "experiment"):
-            return  # Skip if no wandb logger
+        from nablafx._logger_utils import is_wandb_logger
+        if not is_wandb_logger(trainer.logger):
+            return  # This callback only supports WandbLogger.
 
         try:
             print(f"\nLogging audio at each block for {mode}...")

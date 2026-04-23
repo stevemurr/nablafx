@@ -3,6 +3,7 @@ import wandb
 from .base_system import BaseSystem
 from .models import GreyBoxModel
 from nablafx.utils.plotting import plot_gb_model
+from nablafx._logger_utils import is_wandb_logger as _is_wandb_logger
 
 
 class GreyBoxSystem(BaseSystem):
@@ -132,6 +133,8 @@ class GreyBoxSystem(BaseSystem):
             # self.log_frequency_response() # atm needs too much memory
 
     def log_audio_at_each_block(self, input, controls):
+        if not _is_wandb_logger(self.logger):
+            return  # legacy path is wandb-only
         print("\nLogging audio at each block...")
         x = input.to(self.device)
         y = [input]
@@ -159,6 +162,8 @@ class GreyBoxSystem(BaseSystem):
         """
         if self.use_callbacks:
             return  # Parameter visualization handled by ParameterVisualizationCallback
+        if not _is_wandb_logger(self.logger):
+            return  # legacy path is wandb-only
 
         print("\nLogging response and parameters at each block...")
         x = input.to(self.device)

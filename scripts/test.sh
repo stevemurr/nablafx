@@ -1,19 +1,28 @@
 #!/usr/bin/env bash
-# Testing example. The Hydra entrypoint currently only runs `fit`; for `test`
-# the pattern is to hold the trained checkpoint + its resolved config and
-# invoke `trainer.test(system, datamodule=datamodule, ckpt_path=...)` from
-# a small script. This is a TODO — the Lightning CLI `test` subcommand is
-# not yet reimplemented in the Hydra entrypoint.
+# Evaluate a trained checkpoint on a test set.
 #
-# For now, to evaluate a checkpoint:
+# Specify the same MODEL + TRAINER that were used for training (the Lightning
+# checkpoint stores weights only — you re-construct the architecture via
+# Hydra instantiation, then load the weights in via ckpt_path=).
 #
-# CUDA_VISIBLE_DEVICES=0 \
-# uv run python scripts/train.py \
-#   --config-path outputs/<timestamp>/.hydra \
-#   --config-name config \
-#   data=data-param_multidrive-ffuzz_test \
-#   +ckpt_path=outputs/<timestamp>/logs/version_0/checkpoints/last.ckpt
-#
-# (assumes you extend scripts/train.py to honour `ckpt_path`; see README).
-echo "test flow not yet ported to Hydra entrypoint — see comments" >&2
-exit 1
+# Usage:
+#   CKPT=outputs/.../checkpoints/last.ckpt \
+#   MODEL=tcn/model_bb_tcn-45-s-16 \
+#   TEST_DATA=610b_test \
+#   bash scripts/test.sh
+
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+CKPT="${CKPT:?set CKPT=<path/to/checkpoint.ckpt>}"
+MODEL="${MODEL:?set MODEL=<group/path> e.g. tcn/model_bb_tcn-45-s-16}"
+TEST_DATA="${TEST_DATA:-610b_test}"
+TRAINER="${TRAINER:-bb}"
+
+CUDA_VISIBLE_DEVICES=0 \
+uv run python scripts/train.py \
+  mode=test \
+  "data=${TEST_DATA}" \
+  "model=${MODEL}" \
+  "trainer=${TRAINER}" \
+  "ckpt_path=${CKPT}"

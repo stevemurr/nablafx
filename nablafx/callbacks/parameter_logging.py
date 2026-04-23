@@ -127,8 +127,9 @@ class ParameterLoggingCallback(Callback):
         mode: str,
     ) -> None:
         """Log frequency response and parameters for each block."""
-        if not hasattr(trainer.logger, "experiment"):
-            return  # Skip if no wandb logger
+        from nablafx._logger_utils import is_wandb_logger
+        if not is_wandb_logger(trainer.logger):
+            return  # This callback only supports WandbLogger.
 
         try:
             print(f"\nLogging response and parameters at each block for {mode}...")

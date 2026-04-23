@@ -70,8 +70,9 @@ class FrequencyResponseCallback(Callback):
         phase: str,
     ) -> None:
         """Generate and log frequency response plot."""
-        if not hasattr(trainer.logger, "experiment"):
-            return  # Skip if no wandb logger
+        from nablafx._logger_utils import is_wandb_logger
+        if not is_wandb_logger(trainer.logger):
+            return  # This callback only supports WandbLogger.
 
         try:
             print(f"\nLogging frequency response for {phase}...")
