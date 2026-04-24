@@ -141,10 +141,13 @@ class TCN(torch.nn.Module):
         # p = params : (batch, params)
 
         # PADDING
-        if self.causal:
-            x = torch.nn.functional.pad(x, (self.rf - 1, 0))
-        else:
-            x = torch.nn.functional.pad(x, ((self.rf - 1) // 2, (self.rf - 1) // 2))
+        # Streaming-export callers set `_export_skip_pad = True` and prepend
+        # `rf-1` samples of real history in the ring buffer instead.
+        if not getattr(self, "_export_skip_pad", False):
+            if self.causal:
+                x = torch.nn.functional.pad(x, (self.rf - 1, 0))
+            else:
+                x = torch.nn.functional.pad(x, ((self.rf - 1) // 2, (self.rf - 1) // 2))
 
         # CONDITIONING
         if self.cond_type is None:

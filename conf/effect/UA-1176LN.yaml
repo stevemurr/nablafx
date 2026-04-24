@@ -1,0 +1,19 @@
+# Knob metadata for UA 1176LN-derived models.
+#
+# The dataset filename convention encodes knob values with a one-letter prefix
+# (see nablafx/data/datasets.py:235-239), e.g. `A100_R100_I040_O070_RAll`:
+#   A = Attack, R = Release, I = Input, O = Output, (R)All = Ratio locked "all"
+#
+# Non-parametric checkpoints trained against a single locked folder
+# (num_controls == 0) ignore this file entirely. Parametric checkpoints use it
+# to name their ONNX control slots after joining with
+# data.params_idxs_to_use.
+
+name: "UA 1176LN Limiter"
+sample_rate: 44100
+
+controls:
+  A: { name: "Attack",  min: 1.0, max: 7.0, default: 4.0, skew: 1.0, unit: "step" }
+  R: { name: "Release", min: 1.0, max: 7.0, default: 4.0, skew: 1.0, unit: "step" }
+  I: { name: "Input",   min: 0.0, max: 1.0, default: 0.4, skew: 2.0, unit: "" }
+  O: { name: "Output",  min: 0.0, max: 1.0, default: 0.7, skew: 1.0, unit: "" }

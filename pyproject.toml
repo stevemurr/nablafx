@@ -68,6 +68,8 @@ dependencies = [
 
 [project.scripts]
 nablafx = "nablafx.__main__:main"
+nablafx-export = "nablafx.export.cli:main"
+nablafx-plugin = "nablafx.plugin.cli:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
@@ -78,6 +80,14 @@ build-backend = "setuptools.build_meta"
 docs = [
     "sphinx>=6.0",
     "sphinx-rtd-theme>=1.2",
+]
+
+# ONNX stack is only needed by the plugin-export pipeline, not by training.
+# Install with: uv sync --extra export
+export = [
+    "onnx>=1.17",
+    "onnxruntime>=1.20",
+    "pyyaml>=6.0",
 ]
 
 # PEP 735 groups — installed by default with `uv sync`, not shipped in the wheel.
