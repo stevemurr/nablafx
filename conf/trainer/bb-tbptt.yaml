@@ -8,6 +8,7 @@ defaults:
   - /trainer/callbacks@callbacks.early_stopping: early_stopping
   - /trainer/callbacks@callbacks.lr_monitor: lr_monitor
   - /trainer/callbacks@callbacks.model_summary: model_summary
+  - /trainer/callbacks@callbacks.console_progress: console_progress
   - _self_
 
 _target_: lightning.Trainer

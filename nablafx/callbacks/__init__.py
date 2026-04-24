@@ -12,6 +12,7 @@ Available Callbacks:
 - FADComputationCallback: For computing Fréchet Audio Distance metrics
 - ParameterLoggingCallback: For logging gray-box model parameter plots
 - AudioChainLoggingCallback: For logging audio at each processing block
+- ConsoleProgressCallback: Prints train/val progress to stdout (TTY-agnostic)
 """
 
 from .audio_logging import AudioLoggingCallback
@@ -20,6 +21,7 @@ from .frequency_response import FrequencyResponseCallback
 from .fad_computation import FADComputationCallback
 from .parameter_logging import ParameterLoggingCallback
 from .audio_chain_logging import AudioChainLoggingCallback
+from .console_progress import ConsoleProgressCallback
 
 __all__ = [
     "AudioLoggingCallback",
@@ -28,4 +30,5 @@ __all__ = [
     "FADComputationCallback",
     "ParameterLoggingCallback",
     "AudioChainLoggingCallback",
+    "ConsoleProgressCallback",
 ]
