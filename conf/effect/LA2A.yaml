@@ -1,0 +1,18 @@
+# Knob metadata for SignalTrain LA2A-derived models.
+#
+# The LA2A has two knobs (per SignalTrain's effect_info.ini):
+#   Comp/Limit     (switch, 0 or 1)
+#   Peak Reduction (continuous, 0..100)
+#
+# The converter (scripts/convert_signaltrain_la2a.py) encodes those as
+# letter-value tokens in the filename: `C{000|100}_P{000..100}`. The dataset
+# parser normalizes each token's digit payload to [0, 1] — so the model sees
+# Comp/Limit as {0.0, 1.0} and Peak Reduction as 0.00..1.00, regardless of
+# these human-readable ranges.
+
+name: "Teletronix LA-2A"
+sample_rate: 44100
+
+controls:
+  C: { name: "Comp/Limit",     min: 0.0, max: 1.0,   default: 1.0, skew: 1.0, unit: "switch" }
+  P: { name: "Peak Reduction", min: 0.0, max: 100.0, default: 50.0, skew: 1.0, unit: "" }

@@ -1,0 +1,11 @@
+_target_: nablafx.data.DryWetFilesPluginDataModule
+root_dir_dry: ${dataset_root}/SignalTrain_LA2A_nablafx/DRY/test
+root_dir_wet: ${dataset_root}/SignalTrain_LA2A_nablafx/LA2A-CompLimiter/test
+params_idxs_to_use: [0, 1]
+data_to_use: 1.0
+trainval_split: 0.9  # unused for test, datamodule requires it
+sample_length: 220500  # 5.0 s @ 44.1 kHz
+sample_rate: 44100
+preload: false
+batch_size: 4
+num_workers: 4
