@@ -28,6 +28,10 @@ class DryWetFilesPluginDataModule(pl.LightningDataModule):
         preload (bool): Preload audio files into memory.
         batch_size (int): Size of batches.
         num_workers (int): Number of workers for data loading.
+        persistent_workers (bool): Keep DataLoader workers alive between epochs.
+            Only takes effect when num_workers > 0.
+        prefetch_factor (int): Number of batches each worker preloads.
+            Only takes effect when num_workers > 0.
     """
 
     def __init__(
@@ -42,6 +46,8 @@ class DryWetFilesPluginDataModule(pl.LightningDataModule):
         preload: bool = False,
         batch_size: int = 16,
         num_workers: int = 4,
+        persistent_workers: bool = False,
+        prefetch_factor: int = 2,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -55,6 +61,19 @@ class DryWetFilesPluginDataModule(pl.LightningDataModule):
         self.preload = preload
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.persistent_workers = persistent_workers
+        self.prefetch_factor = prefetch_factor
+
+    def _loader_kwargs(self) -> dict:
+        kwargs: dict = {
+            "batch_size": self.batch_size,
+            "num_workers": self.num_workers,
+            "pin_memory": True,
+        }
+        if self.num_workers > 0:
+            kwargs["persistent_workers"] = self.persistent_workers
+            kwargs["prefetch_factor"] = self.prefetch_factor
+        return kwargs
 
     def setup(self, stage: Optional[str] = None) -> None:
         if stage == "fit" or stage == "validate":
@@ -114,25 +133,19 @@ class DryWetFilesPluginDataModule(pl.LightningDataModule):
     def train_dataloader(self) -> torch.utils.data.DataLoader:
         return torch.utils.data.DataLoader(
             self.train_dataset,
-            batch_size=self.batch_size,
             shuffle=True,
-            num_workers=self.num_workers,
             drop_last=True,
-            pin_memory=True,
+            **self._loader_kwargs(),
         )
 
     def val_dataloader(self) -> torch.utils.data.DataLoader:
         return torch.utils.data.DataLoader(
             self.val_dataset,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers,
-            pin_memory=True,
+            **self._loader_kwargs(),
         )
 
     def test_dataloader(self) -> torch.utils.data.DataLoader:
         return torch.utils.data.DataLoader(
             self.test_dataset,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers,
-            pin_memory=True,
+            **self._loader_kwargs(),
         )

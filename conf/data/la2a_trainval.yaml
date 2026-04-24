@@ -1,13 +1,16 @@
 _target_: nablafx.data.DryWetFilesPluginDataModule
-root_dir_dry: ${dataset_root}/SignalTrain_LA2A_nablafx/DRY/trainval
-root_dir_wet: ${dataset_root}/SignalTrain_LA2A_nablafx/LA2A-CompLimiter/trainval
+root_dir_dry: ${dataset_root}/SignalTrain_LA2A-nablafx/DRY/trainval
+root_dir_wet: ${dataset_root}/SignalTrain_LA2A-nablafx/LA2A-CompLimiter/trainval
 # Letters in filename order: C (Comp/Limit), P (Peak Reduction).
 params_idxs_to_use: [0, 1]
 data_to_use: 1.0
 trainval_split: 0.9
 sample_length: 132300  # 3.0 s @ 44.1 kHz
 sample_rate: 44100
-# SignalTrain LA2A is ~20 GB so preload is a memory risk; stream from disk.
-preload: false
-batch_size: 8
-num_workers: 4
+# Trainval audio is ~15 GB (28k samples × 3 s × 44.1 kHz × 4 B); fits in RAM on
+# hosts with ≥32 GB free. Flip to false to stream from disk on smaller boxes.
+preload: true
+batch_size: 64
+num_workers: 12
+persistent_workers: true
+prefetch_factor: 4
