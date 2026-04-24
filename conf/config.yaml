@@ -10,23 +10,23 @@ mode: fit
 ckpt_path: null
 
 # Root directory for datasets. Data configs reference this via ${dataset_root}.
-# Override on the CLI, e.g. `dataset_root=/shared/datasets`.
-dataset_root: /home/murr/jupyter-redux/datasets
+# Override on the CLI, e.g. `dataset_root=/path/to/datasets`.
+dataset_root: /shared/datasets
 
 # Runs land under `<artifact_root>/<dataset>/{outputs,multirun}/<date>/<time>/`,
 # where <dataset> is the data config name with any `_trainval`/`_test` suffix
 # stripped so fit and test runs for the same effect share a parent folder.
 #
 # <artifact_root> comes from $NABLAFX_ARTIFACT_ROOT, defaulting to
-# /shared/artifacts/ToneTwist. Per-run overrides with `hydra.run.dir=...`
-# still work. We read it from the environment rather than a top-level config
-# key because Hydra evaluates interpolations inside `hydra.run.dir` in its
-# own scope, which can't see user config keys.
+# /shared/artifacts. Per-run overrides with `hydra.run.dir=...` still work.
+# We read it from the environment rather than a top-level config key because
+# Hydra evaluates interpolations inside `hydra.run.dir` in its own scope,
+# which can't see user config keys.
 hydra:
   job:
     chdir: false
   run:
-    dir: ${oc.env:NABLAFX_ARTIFACT_ROOT,/shared/artifacts/ToneTwist}/${nablafx.dataset_from_data_choice:${hydra:runtime.choices.data}}/outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ${oc.env:NABLAFX_ARTIFACT_ROOT,/shared/artifacts}/${nablafx.dataset_from_data_choice:${hydra:runtime.choices.data}}/outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
   sweep:
-    dir: ${oc.env:NABLAFX_ARTIFACT_ROOT,/shared/artifacts/ToneTwist}/${nablafx.dataset_from_data_choice:${hydra:runtime.choices.data}}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ${oc.env:NABLAFX_ARTIFACT_ROOT,/shared/artifacts}/${nablafx.dataset_from_data_choice:${hydra:runtime.choices.data}}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
     subdir: ${hydra.job.num}
