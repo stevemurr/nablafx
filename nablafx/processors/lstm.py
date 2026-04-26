@@ -113,12 +113,27 @@ class LSTM(torch.nn.Module):
             x = torch.cat((x, cond), dim=1)  # append to input along feature dim
 
         # PROCESSING PATH
-        x = x.permute(2, 0, 1)  # shape for LSTM (seq, batch, channel)
+        x = x.permute(2, 0, 1).contiguous()  # shape for LSTM (seq, batch, channel)
 
-        if self.is_hidden_state_init:
-            x_proc, new_hidden_state = self.lstm(x, self.hidden_state)
-        else:  # state was reset
-            x_proc, new_hidden_state = self.lstm(x)
+        hidden = self.hidden_state if self.is_hidden_state_init else None
+        # cuDNN's LSTM kernel on Blackwell / CUDA 13 throws
+        # CUDNN_STATUS_NOT_SUPPORTED for sequences ≳ 32k. Training uses small
+        # TBPTT windows so it's fine there, but validation/test feed the whole
+        # clip. Stream through the same LSTM in chunks when we'd otherwise hit
+        # that limit — equivalent semantics because we're threading the hidden
+        # state through.
+        _CUDNN_LSTM_SEQ_LIMIT = 32768
+        if x.is_cuda and x.shape[0] > _CUDNN_LSTM_SEQ_LIMIT and torch.backends.cudnn.enabled:
+            outs = []
+            h = hidden
+            for start in range(0, x.shape[0], _CUDNN_LSTM_SEQ_LIMIT):
+                chunk = x[start : start + _CUDNN_LSTM_SEQ_LIMIT]
+                chunk_out, h = self.lstm(chunk, h)
+                outs.append(chunk_out)
+            x_proc = torch.cat(outs, dim=0)
+            new_hidden_state = h
+        else:
+            x_proc, new_hidden_state = self.lstm(x, hidden) if hidden is not None else self.lstm(x)
 
         if self.residual:
             res = x[:, :, :1]  # [length, batch, num_inputs]

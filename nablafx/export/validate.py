@@ -19,9 +19,37 @@ _UNSUPPORTED_TOP_LEVEL = {
     "GreyBoxModel", # FSM-based IIR approximations; v2 work
 }
 
+# Grey-box processor classes the split-export path knows how to serialize.
+# Anything else in a GreyBoxModel chain currently has no native counterpart
+# on the C++ side, so we reject early to surface that explicitly.
+_GREY_SUPPORTED_PROCESSORS = {
+    "StaticRationalNonlinearity",  # → DspBlockSpec(kind="rational_a")
+    "ParametricEQ",                # → DspBlockSpec(kind="parametric_eq_5band")
+}
+
 
 class ExportValidationError(ValueError):
     """Raised when a model cannot be cleanly exported to streaming ONNX."""
+
+
+def validate_grey_exportable(processors: list[torch.nn.Module]) -> None:
+    """Walk the grey-box processor chain and reject blocks the split-export
+    path does not yet handle. The C++ host has a fixed set of native DSP
+    blocks; this guards against exporting a model whose chain references
+    something that wouldn't have a runtime."""
+    problems: list[str] = []
+    for i, proc in enumerate(processors):
+        cls = type(proc).__name__
+        if cls not in _GREY_SUPPORTED_PROCESSORS:
+            problems.append(
+                f"  - processors[{i}] is a {cls}; split-export currently "
+                f"supports: {sorted(_GREY_SUPPORTED_PROCESSORS)}"
+            )
+    if problems:
+        raise ExportValidationError(
+            "Grey-box model contains processors with no native runtime:\n"
+            + "\n".join(problems)
+        )
 
 
 def validate_exportable(model: torch.nn.Module) -> None:

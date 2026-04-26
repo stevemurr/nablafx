@@ -1,4 +1,5 @@
 import os
+import sys
 import torch
 import random
 import auraloss
@@ -24,6 +25,7 @@ class BaseSystem(pl.LightningModule):
         loss: torch.nn.Module,
         lr: float = 1e-4,
         log_media_every_n_steps: int = 10000,
+        log_grad_norm_every_n_steps: int = 100,
         use_callbacks: bool = False,
     ):
         """
@@ -44,6 +46,7 @@ class BaseSystem(pl.LightningModule):
         self.loss = loss
         self.lr = lr
         self.log_media_every_n_steps = log_media_every_n_steps
+        self.log_grad_norm_every_n_steps = log_grad_norm_every_n_steps
         self.log_media_counter = 0
         self.log_input_and_target_flag = True
         self.use_callbacks = use_callbacks
@@ -91,8 +94,12 @@ class BaseSystem(pl.LightningModule):
             pass  # self.log_frequency_response() # atm needs too much memory
 
     def on_before_optimizer_step(self, optimizer):
-        # Compute the 2-norm for each layer (always enabled)
-        # If using mixed precision, the gradients are already unscaled here
+        # Per-layer L2 grad-norm logging is expensive; profile showed it eating
+        # ~50% of step time when run every step. Sample on a stride instead.
+        # Set log_grad_norm_every_n_steps <= 0 to disable.
+        n = self.log_grad_norm_every_n_steps
+        if n <= 0 or self.trainer.global_step % n != 0:
+            return
         norms = pl.pytorch.utilities.grad_norm(self, norm_type=2)
         self.log_dict(norms)
 
@@ -227,9 +234,14 @@ class BaseSystem(pl.LightningModule):
 
         for name, metric in self.metrics.items():
             metric = metric.to(self.device)
+            # Ensure tensors are contiguous (FSM sosfilt fallback can produce
+            # non-contiguous outputs; some torchmetrics call `.view(-1)` which
+            # requires contiguity).
+            pred = pred.contiguous()
+            target = target.contiguous()
             if pred.dim() == 3:
-                pred = pred.squeeze(1)
-                target = target.squeeze(1)
+                pred = pred.squeeze(1).contiguous()
+                target = target.squeeze(1).contiguous()
             metric_value = metric(pred, target)
 
             metric_value = metric_value.detach().cpu()

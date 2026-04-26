@@ -1,6 +1,5 @@
 import math
 import torch
-import torchaudio
 from typing import Dict, Tuple, Optional, Union
 
 
@@ -175,29 +174,14 @@ def sosfilt_via_fsm(sos: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
 def sosfilt(sos: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     """Apply cascade of second order IIR filters in the time domain.
 
-    The filter will be applied along the final dimension of x.
-    
-    Args:
-        sos: Tensor of coefficients with shape (bs, n_sections, 6)
-        x: Time domain signal with shape (bs, chs, timesteps)
-
-    Returns:
-        Filtered time domain signal with shape (bs, chs, timesteps)
-
-    Note:
-        No gradient computation will occur in this function.
+    Routes through the FSM path. The torchaudio `lfilter` op carries alias
+    annotations that torch.compile/inductor cannot functionalize, and is also
+    broken on some CUDA builds (torchaudio 2.11 on CUDA 13 / Blackwell). FSM
+    is bit-different but plenty accurate for the eval/metrics code paths.
     """
-    x_bs, chs, seq_len = x.size()
-    sos_bs, n_sections, n_coeffs = sos.size()
-    assert n_coeffs == 6  # must be second order
-    assert chs == 1  # must be mono (for now)
-    y = x.squeeze(1)
-    with torch.no_grad():
-        for section_idx in range(n_sections):
-            b_coeffs = sos[:, section_idx, :3]
-            a_coeffs = sos[:, section_idx, 3:]
-            y = torchaudio.functional.lfilter(y, a_coeffs, b_coeffs)
-    return y.unsqueeze(1)
+    assert sos.size(-1) == 6
+    assert x.size(1) == 1
+    return sosfilt_via_fsm(sos, x).contiguous()
 
 
 def biquad(

@@ -148,9 +148,17 @@ class MetricsLoggingCallback(Callback):
                 metric_fn = metric_info["function"]
                 requires_no_grad = metric_info["requires_no_grad"]
 
-                # Prepare tensors
-                pred_for_metric = pred.clone()
-                target_for_metric = target.clone()
+                # Some torchmetrics (e.g. MAE) call `.view(-1)` internally,
+                # which requires contiguity. Upstream tensors can be non-
+                # contiguous (e.g. the FSM sosfilt fallback produces a view).
+                # Allocate fresh contiguous storage and copy into it.
+                pred_for_metric = torch.empty_like(pred).copy_(pred)
+                target_for_metric = torch.empty_like(target).copy_(target)
+                if not pred_for_metric.is_contiguous() or not target_for_metric.is_contiguous():
+                    # Shouldn't happen after empty_like+copy_, but stay loud
+                    # if it somehow does.
+                    print(f"[metrics] warning: tensors still non-contiguous after copy; "
+                          f"pred stride={pred_for_metric.stride()} shape={pred_for_metric.shape}")
 
                 # Ensure metric function is on the same device as the tensors
                 if hasattr(metric_fn, "to"):

@@ -9,6 +9,10 @@ defaults:
 mode: fit
 ckpt_path: null
 
+# Wrap the inner model with torch.compile before training.
+# Disable from the CLI for debugging: `compile=false`.
+compile: true
+
 # Root directory for datasets. Data configs reference this via ${dataset_root}.
 # Override on the CLI, e.g. `dataset_root=/path/to/datasets`.
 dataset_root: /shared/datasets

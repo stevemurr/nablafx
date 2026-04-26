@@ -55,6 +55,11 @@ def main(cfg: DictConfig) -> None:
     datamodule = instantiate(cfg.data, _convert_="all")
     system = instantiate(cfg.model, _convert_="all")
 
+    # torch.compile wraps the inner nn.Module so Lightning's training step,
+    # checkpoint saving, and `self.model` references all keep working.
+    if cfg.get("compile", False) and hasattr(system, "model"):
+        system.model = torch.compile(system.model)
+
     # Callbacks live in a dict keyed by role so CLI overrides can add/remove
     # individual ones. Lightning's Trainer wants a list, so unpack here.
     trainer_cfg = OmegaConf.to_container(cfg.trainer, resolve=True)

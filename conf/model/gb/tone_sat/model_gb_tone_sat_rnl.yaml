@@ -1,0 +1,31 @@
+_target_: nablafx.GreyBoxSystem
+lr: 0.01
+use_callbacks: true
+log_media_every_n_steps: 1000
+model:
+  _target_: nablafx.GreyBoxModel
+  processors:
+  - _target_: nablafx.processors.StaticRationalNonlinearity
+    sample_rate: 44100
+    degrees:
+    - 6
+    - 5
+    init_approx_func: tanh
+    lr_multiplier: 1
+  num_controls: 0
+  stat_control_params_initial: rnd
+  stat_cond_num_layers: 3
+  stat_cond_hidden_dim: 16
+  dyn_block_size: 128
+  dyn_num_layers: 1
+  dyn_cond_block_size: 128
+  dyn_cond_num_layers: 1
+loss:
+  _target_: nablafx.evaluation.FlexibleLoss
+  losses:
+  - name: l1_loss
+    weight: 0.5
+    alias: l1
+  - name: mrstft_loss
+    weight: 0.5
+    alias: mrstft

@@ -10,9 +10,9 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import List, Sequence
+from typing import Any, Dict, List, Sequence
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -34,21 +34,40 @@ class StateSpec:
     dtype: str           # "float32"
 
 
+@dataclass(frozen=True)
+class DspBlockSpec:
+    """A DSP stage that runs natively in the plugin host instead of in ONNX.
+
+    ``kind`` selects the C++ implementation; ``params`` carries the block's
+    serialized state (e.g. rational polynomial coefficients, biquad band
+    layout). Schema is intentionally loose — each ``kind`` defines its own
+    ``params`` shape, validated on the C++ side.
+    """
+    kind: str            # e.g. "rational_a", "parametric_eq_5band"
+    name: str            # qualified name within the processor chain
+    params: Dict[str, Any]
+
+
 @dataclass
 class PluginMeta:
     effect_name: str
     model_id: str
-    architecture: str    # "tcn" | "lstm" | "gcn"
+    architecture: str    # "tcn" | "lstm" | "gcn" | "dsp" (pure DSP, no NN)
     sample_rate: int
     channels: int        # 1 for mono model; plugin may run batch=2 for stereo
     causal: bool
     receptive_field: int        # total RF in samples; plugin ring-buffers (rf - 1)
     latency_samples: int        # reported to host via clap_plugin_latency
     num_controls: int
+    # "nn"  — single ONNX graph (BlackBox); state_tensors / input_names / output_names populated
+    # "dsp" — pure DSP (e.g. trained nonlinearity); no model.onnx, dsp_blocks populated
+    # "nn+dsp" — controller NN exported to ONNX, downstream DSP runs natively (grey-box)
+    stage_kind: str = "nn"
     controls: List[ControlSpec] = field(default_factory=list)
     state_tensors: List[StateSpec] = field(default_factory=list)
     input_names: List[str] = field(default_factory=list)
     output_names: List[str] = field(default_factory=list)
+    dsp_blocks: List[DspBlockSpec] = field(default_factory=list)
     schema_version: int = SCHEMA_VERSION
 
     def to_json(self) -> str:

@@ -27,12 +27,22 @@ from typing import List, Sequence, Tuple
 
 import torch
 
+from nablafx.controllers.controllers import DynamicController, DynamicCondController
 from nablafx.core.models import BlackBoxModel
 from nablafx.processors.components import TFiLM, TinyTFiLM, TVFiLMCond
 from nablafx.processors.lstm import LSTM
 
 
-STATEFUL_CLASSES: Tuple[type, ...] = (LSTM, TVFiLMCond, TFiLM, TinyTFiLM)
+# Each entry holds an inner ``self.lstm: nn.LSTM`` plus ``self.hidden_state``
+# / ``self.is_hidden_state_init`` — the contract collect_stateful relies on.
+STATEFUL_CLASSES: Tuple[type, ...] = (
+    LSTM,
+    TVFiLMCond,
+    TFiLM,
+    TinyTFiLM,
+    DynamicController,
+    DynamicCondController,
+)
 
 
 @dataclass

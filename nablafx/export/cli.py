@@ -23,7 +23,10 @@ import yaml
 
 import nablafx  # noqa: F401 — applies rational-activations patch
 
-from .bundle import ExportInputs, export_bundle
+from nablafx.core.models import BlackBoxModel, GreyBoxModel
+
+from .bundle import ExportInputs, _load_system_and_weights, export_bundle
+from .grey_bundle import export_grey_bundle
 from .validate import ExportValidationError
 
 
@@ -79,19 +82,40 @@ def main(argv: list[str] | None = None) -> int:
             "Example: --letters A,R,I,O"
         ),
     )
+    parser.add_argument(
+        "--ckpt",
+        type=Path,
+        default=None,
+        help=(
+            "Specific .ckpt under run-dir to export. Defaults to "
+            "checkpoints/last.ckpt. Pass the best-by-val ckpt "
+            "(e.g. checkpoints/epoch=N-step=M.ckpt) to ship the converged "
+            "weights for runs stopped past their plateau."
+        ),
+    )
     args = parser.parse_args(argv)
 
     try:
         effect_cfg = _load_effect_cfg(args.effect)
-        meta = export_bundle(
-            ExportInputs(
-                run_dir=args.run_dir,
-                out_dir=args.out,
-                effect_name=(effect_cfg.get("name") if effect_cfg else None),
-                effect_cfg=effect_cfg,
-                letters_in_use=_parse_letters(args.letters),
-            )
+        export_inputs = ExportInputs(
+            run_dir=args.run_dir,
+            out_dir=args.out,
+            effect_name=(effect_cfg.get("name") if effect_cfg else None),
+            effect_cfg=effect_cfg,
+            letters_in_use=_parse_letters(args.letters),
+            ckpt_path=args.ckpt,
         )
+        # Dispatch on the trained system's model class so callers don't have to
+        # know which export pipeline to invoke.
+        system = _load_system_and_weights(args.run_dir, ckpt_path=args.ckpt)
+        if isinstance(system.model, GreyBoxModel):
+            meta = export_grey_bundle(export_inputs)
+        elif isinstance(system.model, BlackBoxModel):
+            meta = export_bundle(export_inputs)
+        else:
+            raise ExportValidationError(
+                f"Unsupported model class {type(system.model).__name__}"
+            )
     except ExportValidationError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -100,6 +124,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     print(f"wrote bundle to {args.out}")
+    print(f"  stage_kind:       {meta.stage_kind}")
     print(f"  architecture:     {meta.architecture}")
     print(f"  model_id:         {meta.model_id}")
     print(f"  sample_rate:      {meta.sample_rate}")
@@ -107,6 +132,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  causal:           {meta.causal}")
     print(f"  num_controls:     {meta.num_controls}")
     print(f"  state_tensors:    {len(meta.state_tensors)}")
+    print(f"  dsp_blocks:       {len(meta.dsp_blocks)}")
     return 0
 
 

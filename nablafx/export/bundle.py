@@ -48,12 +48,23 @@ class ExportInputs:
     effect_name: Optional[str] = None      # human-readable; default = model_id
     effect_cfg: Optional[dict] = None      # parsed conf/effect/<name>.yaml (or None)
     letters_in_use: Optional[Sequence[str]] = None  # from data config / filenames
+    ckpt_path: Optional[Path] = None       # default = run_dir/checkpoints/last.ckpt
 
 
-def _load_system_and_weights(run_dir: Path) -> torch.nn.Module:
-    """Reconstruct the Lightning system from .hydra/config.yaml and load weights."""
+def _load_system_and_weights(
+    run_dir: Path,
+    ckpt_path: Path | None = None,
+) -> torch.nn.Module:
+    """Reconstruct the Lightning system from .hydra/config.yaml and load weights.
+
+    ``ckpt_path`` may point to any .ckpt under the run dir; defaults to
+    ``checkpoints/last.ckpt``. For runs where ModelCheckpoint kept a separate
+    best-by-val checkpoint (``epoch=N-step=M.ckpt``), pass that explicitly to
+    export the converged weights instead of the at-stop weights.
+    """
     hydra_config = run_dir / ".hydra" / "config.yaml"
-    ckpt_path = run_dir / "checkpoints" / "last.ckpt"
+    if ckpt_path is None:
+        ckpt_path = run_dir / "checkpoints" / "last.ckpt"
     if not hydra_config.is_file():
         raise FileNotFoundError(f"Missing {hydra_config}; run_dir must be a Hydra output dir")
     if not ckpt_path.is_file():
@@ -146,7 +157,14 @@ def _model_id_from_run(run_dir: Path, cfg: DictConfig) -> str:
     # ``<artifact_root>/<dataset>/outputs/<date>/<time>/`` — two parents up gets
     # us the dataset slug. Fall back gracefully when the layout differs.
     stamp = f"{run_dir.parent.name}-{run_dir.name}"
-    proc = cfg.model.model.processor._target_.rsplit(".", 1)[-1].lower()  # type: ignore[union-attr]
+    inner = cfg.model.model
+    # BlackBoxModel exposes a single `processor`; GreyBoxModel exposes a
+    # `processors` list. Use the first entry as the stub in either case.
+    if "processor" in inner:
+        target = inner.processor._target_
+    else:
+        target = inner.processors[0]._target_
+    proc = target.rsplit(".", 1)[-1].lower()
     return f"{dataset}_{proc}_{stamp}"
 
 
@@ -163,7 +181,7 @@ def export_bundle(inputs: ExportInputs) -> PluginMeta:
     hydra_config = run_dir / ".hydra" / "config.yaml"
     cfg: DictConfig = OmegaConf.load(hydra_config)  # type: ignore[assignment]
 
-    system = _load_system_and_weights(run_dir)
+    system = _load_system_and_weights(run_dir, ckpt_path=inputs.ckpt_path)
     model: BlackBoxModel = system.model  # type: ignore[attr-defined]
     if not isinstance(model, BlackBoxModel):
         raise ExportValidationError(
@@ -183,10 +201,19 @@ def export_bundle(inputs: ExportInputs) -> PluginMeta:
     num_controls = int(model.num_controls)
     sample_rate = int(cfg.data.sample_rate)
 
-    trace_len = max(MIN_TRACE_BLOCK_LEN, rf + 512)
+    # Fully static trace shape: torch.onnx (TorchScript path) silently bakes
+    # constants into the LSTM cond_nn whenever ``dynamic_axes`` advertises a
+    # variable time dim — the resulting graph only runs cleanly at the trace
+    # length and fails with shape-mismatch errors at any other size. Trace at
+    # the natural per-block rate so the C++ host streams cleanly:
+    #   * Processors with TVFiLM conditioning (``cond_block_size``) trace at
+    #     that block size; cond-NN runs one timestep per ORT call.
+    #   * Plain TCN/GCN trace at ``MIN_TRACE_BLOCK_LEN`` since they have no
+    #     intra-graph time-dependent reshape.
+    trace_len = int(getattr(processor, "cond_block_size",
+                            max(MIN_TRACE_BLOCK_LEN, rf + 512)))
     example = _example_inputs(wrapper, entries, num_controls, trace_len)
     in_names, out_names = _io_names(entries, num_controls)
-    dyn_axes = _dynamic_axes(in_names, out_names)
 
     onnx_path = out_dir / "model.onnx"
     with torch.no_grad():
@@ -200,7 +227,7 @@ def export_bundle(inputs: ExportInputs) -> PluginMeta:
             do_constant_folding=True,
             input_names=in_names,
             output_names=out_names,
-            dynamic_axes=dyn_axes,
+            # No dynamic_axes — see comment on trace_len above.
             dynamo=False,
         )
 

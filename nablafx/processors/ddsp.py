@@ -190,12 +190,14 @@ class ParametricEQ(torch.nn.Module):
         block_size: int = 128,
         control_type: str = "static",
         lr_multiplier: float = 1.0,
+        freeze_freqs: bool = False,
     ):
         super().__init__()
         assert control_type in ["static", "static-cond", "dynamic", "dynamic-cond"]
         self.sample_rate = sample_rate
         self.min_gain_db = min_gain_db
         self.max_gain_db = max_gain_db
+        self.freeze_freqs = freeze_freqs
         self.param_ranges = {
             "low_shelf_gain_db": (min_gain_db, max_gain_db),
             "low_shelf_cutoff_freq": (20.0, 2000.0),
@@ -213,6 +215,15 @@ class ParametricEQ(torch.nn.Module):
             "high_shelf_cutoff_freq": (4000.0, 16000.0),
             "high_shelf_q_factor": (min_q_factor, max_q_factor),
         }
+        # When freeze_freqs=True, collapse each cutoff range to its midpoint so
+        # denormalize_parameters always returns the fixed frequency regardless of
+        # the incoming [0,1] control value.
+        if freeze_freqs:
+            for key in list(self.param_ranges.keys()):
+                if key.endswith("_cutoff_freq"):
+                    lo, hi = self.param_ranges[key]
+                    mid = 0.5 * (lo + hi)
+                    self.param_ranges[key] = (mid, mid)
         self.block_size = block_size
         self.control_type = control_type
         self.lr_multiplier = lr_multiplier

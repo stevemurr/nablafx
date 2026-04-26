@@ -216,9 +216,15 @@ class GreyBoxSystem(BaseSystem):
             eps=1e-8,
         )
 
-        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=20)
-
-        return [optimizer], [{"scheduler": lr_scheduler, "monitor": "loss/val/tot", "interval": "epoch", "frequency": 1}]
+        # Scheduler is stepped manually in on_validation_epoch_end so it tracks
+        # val frequency, not epoch frequency. Returning the scheduler in
+        # configure_optimizers would let Lightning auto-step it on every epoch
+        # end, which crashes when check_val_every_n_epoch > 1 (the val metric
+        # isn't available on non-val epochs).
+        self._lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="min", factor=0.5, patience=20
+        )
+        return optimizer
 
 
 class GreyBoxSystemWithTBPTT(GreyBoxSystem):
@@ -302,4 +308,4 @@ class GreyBoxSystemWithTBPTT(GreyBoxSystem):
         return tot_batch_loss
 
     def on_validation_epoch_end(self):
-        self.lr_schedulers().step(self.trainer.logged_metrics["loss/val/tot"])
+        self._lr_scheduler.step(self.trainer.logged_metrics["loss/val/tot"])

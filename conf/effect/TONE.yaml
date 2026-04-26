@@ -1,0 +1,20 @@
+# TONE — composite mastering plugin.
+#
+# The composite plugin's CLAP meta is built by scripts/export_tone.py from
+# three per-stage bundles (auto-EQ, saturator, LA-2A) plus the two DSP-only
+# stages (LUFS leveler, true-peak ceiling) that run inside the CLAP host.
+#
+# This file is for reference / CLAP-export tooling — individual NN stages use
+# their own effect configs (e.g. LA2A.yaml for the LA-2A leg).
+
+name: "TONE"
+sample_rate: 44100
+
+controls:
+  AMT: { name: "Amount",      min: 0.0,  max: 1.0,   default: 0.5, skew: 1.0, unit: "" }
+  TRM: { name: "Output Trim", min: -12.0, max: 12.0, default: 0.0, skew: 1.0, unit: "dB" }
+
+# Internal (not exposed as controls):
+#   - Target LUFS is fixed at -14 dBFS per the design spec.
+#   - Amount maps to: saturator pre-gain [0, +12 dB], LA-2A Peak Reduction
+#     [20, 70], auto-EQ wet/dry mix [0, 1].

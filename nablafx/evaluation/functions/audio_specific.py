@@ -234,6 +234,109 @@ class AWeightingLoss(torch.nn.Module):
         return loss
 
 
+@register_function("brown_spectrum_loss", differentiable=True)
+class BrownSpectrumLoss(torch.nn.Module):
+    """Squared deviation of the log-mel slope from -6 dB/oct (brown noise).
+
+    Fits a line in log-frequency vs. log-power space and penalizes the squared
+    distance between the fitted slope and -6 dB/oct. Only the slope is scored —
+    overall level is free, so this loss disregards output gain.
+
+    This is a weak, shape-level signal; pair with MRSTFT against the EQ'd
+    target for actual filter identification.
+    """
+
+    TARGET_SLOPE_DB_PER_OCT = -6.0
+
+    def __init__(
+        self,
+        sample_rate: float = 44100.0,
+        n_fft: int = 2048,
+        n_mels: int = 64,
+        f_min: float = 50.0,
+        f_max: float = 16000.0,
+        eps: float = 1e-8,
+        reduction: str = "mean",
+    ):
+        super().__init__()
+        self.sample_rate = sample_rate
+        self.n_fft = n_fft
+        self.n_mels = n_mels
+        self.f_min = f_min
+        self.f_max = f_max
+        self.eps = eps
+        self.reduction = reduction
+
+        import math
+
+        mel_min = 2595.0 * math.log10(1.0 + 20.0 / 700.0)
+        mel_max = 2595.0 * math.log10(1.0 + (sample_rate / 2) / 700.0)
+        mel_points = torch.linspace(mel_min, mel_max, n_mels + 2)
+        hz_points = 700.0 * (10 ** (mel_points / 2595.0) - 1.0)
+        self.register_buffer("mel_hz", hz_points[1:-1])
+
+        n_freqs = n_fft // 2 + 1
+        bins = (hz_points * (n_fft / sample_rate)).clamp(0, n_freqs - 1)
+        fb = torch.zeros(n_mels, n_freqs)
+        for m in range(n_mels):
+            left, center, right = bins[m], bins[m + 1], bins[m + 2]
+            idx = torch.arange(n_freqs, dtype=torch.float32)
+            up = (idx - left) / (center - left + eps)
+            dn = (right - idx) / (right - center + eps)
+            fb[m] = torch.clamp(torch.minimum(up, dn), min=0.0)
+        self.register_buffer("mel_fb", fb)
+
+        # Prebuild the lstsq design matrix (for slope fitting over the in-band mels).
+        in_band = (self.mel_hz >= f_min) & (self.mel_hz <= f_max)
+        log_f = torch.log2(self.mel_hz[in_band] / 1000.0)
+        A = torch.stack([log_f, torch.ones_like(log_f)], dim=-1)
+        self.register_buffer("in_band_mask", in_band)
+        self.register_buffer("design_mat", A)  # [M_in, 2]
+        # (A^T A)^{-1} A^T for a fast closed-form slope fit.
+        pinv = torch.linalg.pinv(A)  # [2, M_in]
+        self.register_buffer("design_pinv", pinv)
+
+    def _log_mel_power(self, x: torch.Tensor) -> torch.Tensor:
+        # x: [*, T] or [bs, 1, T]
+        if x.dim() == 3 and x.shape[1] == 1:
+            x = x.squeeze(1)
+        window = torch.hann_window(self.n_fft, device=x.device, dtype=x.dtype)
+        spec = torch.stft(
+            x, n_fft=self.n_fft, hop_length=self.n_fft // 4, win_length=self.n_fft,
+            window=window, return_complex=True, center=True,
+        )
+        power = spec.real.pow(2) + spec.imag.pow(2)
+        power = power.mean(dim=-1)  # [bs, n_freqs]
+        mel = power @ self.mel_fb.T  # [bs, n_mels]
+        return 10.0 * torch.log10(mel + self.eps)
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        log_mel = self._log_mel_power(pred)  # [bs, n_mels]
+        # Clamp to a sane dB floor: silent / padded regions otherwise yield
+        # log10(eps) ≈ -80 dB and skew the slope fit. -90 dBFS is below any
+        # signal we care about as music content.
+        log_mel = torch.clamp(log_mel, min=-90.0, max=20.0)
+        in_band = log_mel[:, self.in_band_mask]  # [bs, M_in]
+
+        # Skip per-batch elements that are effectively silent — their slope
+        # carries no information.
+        avg_db = in_band.mean(dim=-1)
+        valid = avg_db > -75.0
+        if not valid.any():
+            return torch.zeros((), device=pred.device, dtype=pred.dtype)
+
+        sol = in_band @ self.design_pinv.T  # [bs, 2]  (slope, intercept)
+        slope = sol[:, 0]
+        deviation = (slope - self.TARGET_SLOPE_DB_PER_OCT) ** 2
+        # Mask out invalid (silent) slope estimates.
+        deviation = deviation * valid.to(deviation.dtype)
+        if self.reduction == "mean":
+            return deviation.sum() / valid.sum().clamp(min=1).to(deviation.dtype)
+        if self.reduction == "sum":
+            return deviation.sum()
+        return deviation
+
+
 @register_function("zero_crossing_rate_metric", differentiable=False, requires_no_grad=True)
 class ZeroCrossingRateMetric(torch.nn.Module):
     """Zero Crossing Rate metric.
