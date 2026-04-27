@@ -61,9 +61,16 @@ repo = Path("$REPO")
 bundles = repo / "artifacts" / "tone-bundles"
 out_dir = Path("$STAGING")
 
-# Use the package's own composer if it imports cleanly (no external deps).
-sys.path.insert(0, str(repo))
-from nablafx.export.composite import export_composite_bundle
+# Load composite.py directly to avoid triggering nablafx/__init__.py (which
+# pulls in omegaconf and other training-only deps not needed here).
+import importlib.util, sys as _sys
+_spec = importlib.util.spec_from_file_location(
+    "composite", repo / "nablafx" / "export" / "composite.py"
+)
+_mod = importlib.util.module_from_spec(_spec)
+_sys.modules["composite"] = _mod   # must be registered before exec so dataclass __module__ resolves (Python 3.14+)
+_spec.loader.exec_module(_mod)
+export_composite_bundle = _mod.export_composite_bundle
 
 meta = export_composite_bundle(
     auto_eq_bundle   = bundles / "auto_eq",

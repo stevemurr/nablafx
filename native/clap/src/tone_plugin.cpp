@@ -27,9 +27,15 @@
 #include <cstring>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
+
+#include <nlohmann/json.hpp>
+
+#include "tone_gui.h"
 
 #include <dlfcn.h>
 
@@ -37,6 +43,7 @@
 #include <onnxruntime_cxx_api.h>
 
 #include "composite_meta.hpp"
+#include "dimension_d.hpp"
 #include "lufs_leveler.hpp"
 #include "meta.hpp"
 #include "param_id.hpp"
@@ -56,6 +63,7 @@ using nablafx::PluginMeta;
 using nablafx::RationalA;
 using nablafx::RationalAParams;
 using nablafx::TruePeakCeiling;
+using nablafx::DimensionD;
 using nablafx::load_composite_meta;
 using nablafx::load_meta;
 using nablafx::param_id_for;
@@ -64,7 +72,147 @@ using nablafx::param_id_for;
 // which matches both the auto-EQ controller's cond_block_size and the LA-2A
 // processor's TVFiLM cond_block_size. Changing this requires re-exporting both
 // ONNX bundles at the new block size.
-constexpr int kBlockSize = 128;
+constexpr int kBlockSize  = 128;
+constexpr int kNumStages  = 6;
+
+enum class StageID : int {
+    InputLeveler  = 0,
+    AutoEQ        = 1,
+    Saturator     = 2,
+    Compressor    = 3,
+    OutputLeveler = 4,
+    SpatialD      = 5,
+};
+
+// ---------------------------------------------------------------------------
+// Spectrum analyzer — Goertzel-based, runs on main thread
+// ---------------------------------------------------------------------------
+
+struct SpectrumAnalyzer {
+    static constexpr int   kFFT   = 2048;   // accumulation window
+    static constexpr int   kDisp  = 128;    // log-spaced display bins
+    static constexpr float kAlpha = 0.88f;  // EMA coefficient (~0.5 s at ~21 fps)
+    static constexpr float kFlo   = 20.f;
+    static constexpr float kFhi   = 20000.f;
+
+    // Audio thread: one mono accumulator per chain position.
+    struct Accum {
+        std::array<float, kFFT> buf{};
+        int fill{0};
+    };
+    std::array<Accum, kNumStages> accum{};
+
+    // Transfer buffer: audio thread fills, main thread processes.
+    std::mutex  xfer_mtx;
+    bool        xfer_ready{false};
+    std::array<std::array<float, kFFT>, kNumStages> xfer_frames{};
+
+    // Main-thread state.
+    std::array<float, kFFT>  hann{};
+    std::array<float, kDisp> disp_hz{};    // Hz for each display bin
+    std::array<float, kFFT>  windowed{};   // scratch for Goertzel input
+
+    // EMA magnitude [chain_pos][disp_bin], linear.
+    std::array<std::array<float, kDisp>, kNumStages> ema{};
+
+    // Staging for JSON build (main thread only).
+    std::array<std::array<float, kFFT>, kNumStages> mt_frames{};
+
+    void init() {
+        for (int i = 0; i < kFFT; ++i)
+            hann[i] = 0.5f * (1.f - std::cos(2.f * static_cast<float>(M_PI) * i / kFFT));
+        for (int i = 0; i < kDisp; ++i)
+            disp_hz[i] = kFlo * std::pow(kFhi / kFlo, float(i) / (kDisp - 1));
+        for (auto& row : ema) row.fill(0.f);
+    }
+
+    // Audio thread: accumulate n mono (or averaged stereo) samples for chain pos.
+    void push(int pos, const float* L, const float* R, uint32_t n_ch, int n) {
+        auto& a = accum[pos];
+        if (a.fill >= kFFT) return;
+        const int take = std::min(n, kFFT - a.fill);
+        float* dst = a.buf.data() + a.fill;
+        if (n_ch >= 2) {
+            for (int i = 0; i < take; ++i) dst[i] = 0.5f * (L[i] + R[i]);
+        } else {
+            std::copy_n(L, take, dst);
+        }
+        a.fill += take;
+    }
+
+    // Audio thread: when all accumulators are full, try to hand off to main thread.
+    // Returns true when a transfer was attempted (whether or not the lock was acquired).
+    bool advance_and_transfer() {
+        if (accum[0].fill < kFFT) return false;
+        if (xfer_mtx.try_lock()) {
+            for (int p = 0; p < kNumStages; ++p) xfer_frames[p] = accum[p].buf;
+            xfer_ready = true;
+            xfer_mtx.unlock();
+        }
+        for (auto& a : accum) a.fill = 0;
+        return true;
+    }
+
+    // Main thread: process pending transfer; returns true if new data was ready.
+    bool process_if_ready(double sample_rate) {
+        {
+            std::lock_guard<std::mutex> lk(xfer_mtx);
+            if (!xfer_ready) return false;
+            mt_frames  = xfer_frames;   // copy ~48 KB while holding lock
+            xfer_ready = false;
+        }
+        const float sr = static_cast<float>(sample_rate);
+        for (int pos = 0; pos < kNumStages; ++pos) {
+            for (int i = 0; i < kFFT; ++i)
+                windowed[i] = mt_frames[pos][i] * hann[i];
+            for (int b = 0; b < kDisp; ++b) {
+                const float bin_f = disp_hz[b] * kFFT / sr;
+                const float mag   = goertzel(windowed.data(), kFFT, bin_f);
+                ema[pos][b] = kAlpha * ema[pos][b] + (1.f - kAlpha) * mag;
+            }
+        }
+        return true;
+    }
+
+    // Main thread: build the JS call string for the WebView.
+    std::string build_js(const std::array<int, kNumStages>& order) const {
+        std::string s;
+        s.reserve(8192);
+        s = "toneSpectrum({\"order\":[";
+        for (int i = 0; i < kNumStages; ++i) { if (i) s += ','; s += std::to_string(order[i]); }
+        s += "],\"db\":[";
+        char buf[16];
+        for (int pos = 0; pos < kNumStages; ++pos) {
+            if (pos) s += ',';
+            s += '[';
+            for (int b = 0; b < kDisp; ++b) {
+                if (b) s += ',';
+                snprintf(buf, sizeof(buf), "%.1f",
+                         20.f * std::log10(std::max(ema[pos][b], 1e-9f)));
+                s += buf;
+            }
+            s += ']';
+        }
+        s += "]});";
+        return s;
+    }
+
+private:
+    // Goertzel algorithm for the magnitude at a single fractional bin.
+    static float goertzel(const float* x, int N, float bin_f) {
+        const int    k     = static_cast<int>(std::round(bin_f));
+        const double w     = 2.0 * M_PI * static_cast<double>(std::clamp(k, 0, N/2));
+                           // N samples in denominator:
+        const double coeff = 2.0 * std::cos(w / N);
+        double s1 = 0.0, s2 = 0.0;
+        for (int n = 0; n < N; ++n) {
+            const double s0 = x[n] + coeff * s1 - s2;
+            s2 = s1; s1 = s0;
+        }
+        const float power = static_cast<float>(s1*s1 + s2*s2 - coeff*s1*s2);
+        return std::sqrt(std::max(power, 0.f)) * (2.f / N);
+    }
+};
 
 // ---------------------------------------------------------------------------
 // Module-global state (loaded once at module init)
@@ -150,8 +298,8 @@ public:
         for (auto& s : in_names_owned_)  in_names_.push_back(s.c_str());
         for (auto& s : out_names_owned_) out_names_.push_back(s.c_str());
 
-        // Allocate state buffers in/out. Shapes come from the meta; "_in"
-        // matches "_out" 1:1 by stripping the suffix.
+        // Allocate state buffers and pre-build owned "_in"/"_out" name strings
+        // so run() never constructs temporaries whose .c_str() would dangle.
         for (const auto& s : meta.state_tensors) {
             int64_t n = 1;
             for (auto d : s.shape) n *= d;
@@ -159,6 +307,8 @@ public:
             in_states_[s.name].data.assign(n, 0.0f);
             out_states_[s.name].shape = s.shape;
             out_states_[s.name].data.assign(n, 0.0f);
+            state_in_names_owned_.push_back(s.name + "_in");
+            state_out_names_owned_.push_back(s.name + "_out");
         }
     }
 
@@ -196,12 +346,12 @@ public:
         }
 
         // Add state inputs in the order the meta declared them.
-        for (const auto& s : meta_.state_tensors) {
-            auto& buf = in_states_[s.name];
+        for (std::size_t si = 0; si < meta_.state_tensors.size(); ++si) {
+            auto& buf = in_states_[meta_.state_tensors[si].name];
             inputs.push_back(Ort::Value::CreateTensor<float>(
                 cpu_, buf.data.data(), static_cast<int64_t>(buf.data.size()),
                 buf.shape.data(), buf.shape.size()));
-            in_names.push_back(in_name_for_state_(s.name).c_str());
+            in_names.push_back(state_in_names_owned_[si].c_str());
         }
 
         // Output: audio first, then states in declared order.
@@ -223,14 +373,15 @@ public:
         std::copy_n(aud_out, audio_out_len, audio_out);
 
         // Read back states by output-name (always "<state>_out").
-        for (const auto& s : meta_.state_tensors) {
-            const std::string out_name = out_name_for_state_(s.name);
+        for (std::size_t si = 0; si < meta_.state_tensors.size(); ++si) {
+            const std::string& out_name = state_out_names_owned_[si];
             std::size_t idx = 0;
             for (std::size_t i = 0; i < out_names_owned_.size(); ++i) {
                 if (out_names_owned_[i] == out_name) { idx = i; break; }
             }
             const float* p = outs[idx].GetTensorData<float>();
-            std::copy_n(p, out_states_[s.name].data.size(), out_states_[s.name].data.begin());
+            const std::string& sname = meta_.state_tensors[si].name;
+            std::copy_n(p, out_states_[sname].data.size(), out_states_[sname].data.begin());
         }
     }
 
@@ -256,12 +407,12 @@ public:
             aud_shape.data(), aud_shape.size()));
         in_names.push_back("audio_in");
 
-        for (const auto& s : meta_.state_tensors) {
-            auto& buf = in_states_[s.name];
+        for (std::size_t si = 0; si < meta_.state_tensors.size(); ++si) {
+            auto& buf = in_states_[meta_.state_tensors[si].name];
             inputs.push_back(Ort::Value::CreateTensor<float>(
                 cpu_, buf.data.data(), static_cast<int64_t>(buf.data.size()),
                 buf.shape.data(), buf.shape.size()));
-            in_names.push_back(in_name_for_state_(s.name).c_str());
+            in_names.push_back(state_in_names_owned_[si].c_str());
         }
         for (const auto& nm : out_names_) out_names.push_back(nm);
 
@@ -279,32 +430,27 @@ public:
             params_out_first[c] = p[c * audio_in_len + 0];
         }
 
-        for (const auto& s : meta_.state_tensors) {
-            const std::string out_name = out_name_for_state_(s.name);
+        for (std::size_t si = 0; si < meta_.state_tensors.size(); ++si) {
+            const std::string& out_name = state_out_names_owned_[si];
             std::size_t idx = 0;
             for (std::size_t i = 0; i < out_names_owned_.size(); ++i) {
                 if (out_names_owned_[i] == out_name) { idx = i; break; }
             }
             const float* sp = outs[idx].GetTensorData<float>();
-            std::copy_n(sp, out_states_[s.name].data.size(), out_states_[s.name].data.begin());
+            const std::string& sname = meta_.state_tensors[si].name;
+            std::copy_n(sp, out_states_[sname].data.size(), out_states_[sname].data.begin());
         }
     }
 
 private:
-    static std::string in_name_for_state_(const std::string& base) {
-        // e.g. "processor_h" → "processor_h_in"
-        return base + "_in";
-    }
-    static std::string out_name_for_state_(const std::string& base) {
-        return base + "_out";
-    }
-
     Ort::Env&                     env_;
     Ort::MemoryInfo               cpu_;
     PluginMeta                    meta_;
     std::unique_ptr<Ort::Session> session_;
     std::vector<std::string>      in_names_owned_;
     std::vector<std::string>      out_names_owned_;
+    std::vector<std::string>      state_in_names_owned_;   // "<base>_in" per state tensor
+    std::vector<std::string>      state_out_names_owned_;  // "<base>_out" per state tensor
     std::vector<const char*>      in_names_;
     std::vector<const char*>      out_names_;
     std::unordered_map<std::string, StateBuf> in_states_;
@@ -312,13 +458,15 @@ private:
 };
 
 struct ChannelChain {
-    // Per-channel stage instances. LufsLeveler and TruePeakCeiling each have
-    // their own state and run unsmoothed across the host buffer (the leveler's
-    // attack/release covers gain ramps; the ceiling has its own lookahead).
-    LufsLeveler                            leveler;
+    // Per-channel stage instances. TruePeakCeiling runs per-channel; the
+    // LufsLeveler is shared on Plugin so it can apply linked stereo gain.
     std::unique_ptr<OrtMiniSession>        autoeq_ort;
     ParametricEq5Band                      autoeq_eq;
     RationalA                              saturator;
+    // 1st-order HPF for bass-preserved saturation (bilinear transform).
+    float sat_hpf_fc{-1.f};               // cached cutoff; -1 = stale
+    float sat_hpf_b0{0.f}, sat_hpf_b1{0.f}, sat_hpf_a1{0.f};
+    float sat_hpf_x1{0.f}, sat_hpf_y1{0.f};
     std::unique_ptr<OrtMiniSession>        la2a_ort;
     TruePeakCeiling                        ceiling;
 
@@ -347,9 +495,30 @@ struct Plugin {
     double               sample_rate{};
     bool                 activated{false};
 
-    // AMT, TRM in host-rate units (default 0.5, 0.0).
     std::vector<float>   control_values;
 
+    // Processor ordering — driven by GUI drag-and-drop.
+    std::array<int, kNumStages> processor_order{0, 1, 2, 3, 4, 5};
+
+    // GUI → audio-thread param queue (try_lock on audio thread, never blocks).
+    std::mutex                       param_mutex;
+    std::vector<std::pair<int,float>> param_queue;
+
+    // GUI → audio-thread order change.
+    std::mutex               order_mutex;
+    bool                     order_pending{false};
+    std::array<int,kNumStages> pending_order{0,1,2,3,4,5};
+
+    // CLAP GUI handle (main thread only).
+    ToneGUIState* gui_state{nullptr};
+
+    // Spectrum analyzer (audio thread accumulates, main thread computes + renders).
+    SpectrumAnalyzer spectrum;
+
+    // Shared levelers — input and output, both apply linked L/R gain.
+    LufsLeveler              leveler;
+    LufsLeveler              out_leveler;
+    DimensionD               dimension_d;
     std::vector<ChannelChain> chains;
 };
 
@@ -434,38 +603,103 @@ static const clap_plugin_params_t s_ext_params = {
 static uint32_t latency_get(const clap_plugin_t* p) {
     auto* plug = static_cast<Plugin*>(p->plugin_data);
     if (plug->chains.empty()) return 0;
-    // One full block of accumulator + the ceiling's lookahead.
-    return static_cast<uint32_t>(kBlockSize + plug->chains[0].ceiling.latency_samples());
+    return static_cast<uint32_t>(plug->chains[0].ceiling.latency_samples());
 }
 
 static const clap_plugin_latency_t s_ext_latency = {latency_get};
 
 // ---------------------------------------------------------------------------
+// CLAP extension: state (save / load)
+// ---------------------------------------------------------------------------
+
+static bool state_save(const clap_plugin_t* p, const clap_ostream_t* stream) {
+    auto* plug = static_cast<Plugin*>(p->plugin_data);
+    nlohmann::json j;
+    j["version"] = 2;
+    for (size_t i = 0; i < plug->meta->controls.size(); ++i)
+        j["controls"][plug->meta->controls[i].id] = plug->control_values[i];
+    auto& jo = j["processor_order"];
+    for (int i = 0; i < kNumStages; ++i) jo.push_back(plug->processor_order[i]);
+    std::string txt = j.dump();
+    int64_t written = stream->write(stream, txt.data(), txt.size());
+    return written == static_cast<int64_t>(txt.size());
+}
+
+static bool state_load(const clap_plugin_t* p, const clap_istream_t* stream) {
+    auto* plug = static_cast<Plugin*>(p->plugin_data);
+    std::string txt;
+    char buf[4096];
+    int64_t n;
+    while ((n = stream->read(stream, buf, sizeof(buf))) > 0)
+        txt.append(buf, static_cast<size_t>(n));
+    if (n < 0) return false;
+    try {
+        auto j = nlohmann::json::parse(txt);
+        auto& jc = j.at("controls");
+        for (size_t i = 0; i < plug->meta->controls.size(); ++i) {
+            const auto& id = plug->meta->controls[i].id;
+            if (jc.contains(id))
+                plug->control_values[i] = jc.at(id).get<float>();
+        }
+        if (j.contains("processor_order")) {
+            auto& jo = j.at("processor_order");
+            if (jo.is_array() && static_cast<int>(jo.size()) == kNumStages) {
+                for (int i = 0; i < kNumStages; ++i)
+                    plug->processor_order[i] = jo[i].get<int>();
+            }
+        }
+    } catch (...) { return false; }
+
+    // Tell the host that all parameter values changed.
+    const auto* host_params = static_cast<const clap_host_params_t*>(
+        plug->host->get_extension(plug->host, CLAP_EXT_PARAMS));
+    if (host_params && host_params->rescan)
+        host_params->rescan(plug->host, CLAP_PARAM_RESCAN_VALUES);
+    return true;
+}
+
+static const clap_plugin_state_t s_ext_state = {state_save, state_load};
+
+// ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-static bool plugin_init(const clap_plugin_t*) { return true; }
-static void plugin_destroy(const clap_plugin_t* p) { delete static_cast<Plugin*>(p->plugin_data); }
+static bool plugin_init(const clap_plugin_t* p) {
+    auto* plug = static_cast<Plugin*>(p->plugin_data);
+    plug->control_values.resize(plug->meta->controls.size());
+    for (size_t i = 0; i < plug->meta->controls.size(); ++i)
+        plug->control_values[i] = plug->meta->controls[i].def;
+    return true;
+}
+static void plugin_destroy(const clap_plugin_t* p) {
+    auto* plug = static_cast<Plugin*>(p->plugin_data);
+    if (plug->gui_state) { tone_gui_destroy(plug->gui_state); plug->gui_state = nullptr; }
+    delete plug;
+}
 
 static bool plugin_activate(const clap_plugin_t* p, double sample_rate,
                             uint32_t /*min_frames*/, uint32_t /*max_frames*/) {
     auto* plug = static_cast<Plugin*>(p->plugin_data);
-    if (static_cast<int>(std::lround(sample_rate)) != plug->meta->sample_rate) return false;
-
     plug->sample_rate = sample_rate;
     plug->control_values.assign(plug->meta->controls.size(), 0.0f);
     for (size_t i = 0; i < plug->meta->controls.size(); ++i) {
         plug->control_values[i] = plug->meta->controls[i].def;
     }
 
+    plug->leveler = LufsLeveler(LufsLeveler::Config{
+        /*target_lufs=*/g_state->tone_meta.leveler.target_lufs,
+    });
+    plug->leveler.reset(sample_rate, g_state->tone_meta.leveler.target_lufs);
+    plug->out_leveler = LufsLeveler(LufsLeveler::Config{
+        /*target_lufs=*/g_state->tone_meta.leveler.target_lufs,
+    });
+    plug->out_leveler.reset(sample_rate, g_state->tone_meta.leveler.target_lufs);
+
+    plug->dimension_d.reset(sample_rate, /*rate_hz=*/0.8, /*depth_norm=*/0.5);
+
     plug->chains.clear();
     plug->chains.resize(plug->channels);
     for (auto& ch : plug->chains) {
-        ch.leveler = LufsLeveler(LufsLeveler::Config{
-            /*target_lufs=*/g_state->tone_meta.leveler.target_lufs,
-        });
-        ch.leveler.reset(sample_rate, g_state->tone_meta.leveler.target_lufs);
-
         ch.autoeq_ort = std::make_unique<OrtMiniSession>(
             *g_state->ort_env,
             g_state->resources_dir + "/" + g_state->tone_meta.sub_bundles.at("auto_eq")
@@ -495,6 +729,8 @@ static bool plugin_activate(const clap_plugin_t* p, double sample_rate,
         ch.out_read  = 0;
     }
 
+    plug->spectrum.init();
+
     plug->activated = true;
     return true;
 }
@@ -510,8 +746,10 @@ static void plugin_stop_processing(const clap_plugin_t*) {}
 
 static void plugin_reset(const clap_plugin_t* p) {
     auto* plug = static_cast<Plugin*>(p->plugin_data);
+    plug->leveler.reset(plug->sample_rate, g_state->tone_meta.leveler.target_lufs);
+    plug->out_leveler.reset(plug->sample_rate, g_state->tone_meta.leveler.target_lufs);
+    plug->dimension_d.reset(plug->sample_rate, /*rate_hz=*/0.8, /*depth_norm=*/0.5);
     for (auto& ch : plug->chains) {
-        ch.leveler.reset(plug->sample_rate, g_state->tone_meta.leveler.target_lufs);
         if (ch.autoeq_ort) ch.autoeq_ort->reset_state();
         if (ch.la2a_ort)   ch.la2a_ort->reset_state();
         ch.ceiling.reset(plug->sample_rate);
@@ -529,84 +767,238 @@ static void plugin_reset(const clap_plugin_t* p) {
 
 namespace {
 
-// Snapshot of host-rate AMT/TRM resolved to per-stage parameters. Recomputed
-// on every block; cheap.
 struct AmountSnapshot {
+    float lvl_wet, lvl_target_lufs;
+    float out_lvl_wet, out_lvl_target_lufs;
     float autoeq_wet_mix;
-    float sat_pre_db;
-    float sat_post_db;
-    float sat_wet_mix;
-    float la2a_pr_norm;
-    float la2a_comp_or_limit;
+    float eq_band_offsets[5];
+    float sat_pre_db, sat_post_db, sat_wet_mix, sat_hpf_hz, sat_thresh_lin, sat_bias;
+    float la2a_wet, la2a_pr_norm, la2a_comp_or_limit;
+    float sp_wet, sp_rate, sp_depth;
     float trim_lin;
 };
 
 AmountSnapshot resolve_amount_(const Plugin& plug) {
-    // controls is keyed by index into meta->controls (AMT first, then TRM by
-    // construction in composite.py). Look up by id to be safe.
-    float amt = 0.5f, trm_db = 0.0f;
-    for (size_t i = 0; i < plug.meta->controls.size(); ++i) {
-        const auto& c = plug.meta->controls[i];
-        if (c.id == "AMT") amt = std::clamp(plug.control_values[i], c.min, c.max);
-        if (c.id == "TRM") trm_db = std::clamp(plug.control_values[i], c.min, c.max);
+    float lvl=1.f,lvt=-14.f,sdr=0.f,svo=0.f,smx=0.5f,shf=20.f,sth=0.f,sbs=0.f;
+    float cl=1.f,cmp=50.f,eq=0.5f,trm_db=0.f;
+    float olv=1.f,olt=-14.f,spw=0.f,spr=0.8f,spd=0.5f;
+    float eq_off[5]={};
+    for (size_t i=0;i<plug.meta->controls.size();++i) {
+        const auto& c=plug.meta->controls[i];
+        float v=std::clamp(plug.control_values[i],c.min,c.max);
+        if(c.id=="LVL") lvl=v; else if(c.id=="LVT") lvt=v;
+        else if(c.id=="SDR") sdr=v; else if(c.id=="SVO") svo=v;
+        else if(c.id=="SMX") smx=v; else if(c.id=="SHF") shf=v;
+        else if(c.id=="STH") sth=v; else if(c.id=="SBS") sbs=v;
+        else if(c.id=="C_L") cl=v;
+        else if(c.id=="CMP") cmp=v; else if(c.id=="EQ")  eq=v;
+        else if(c.id=="EQ0") eq_off[0]=v; else if(c.id=="EQ1") eq_off[1]=v;
+        else if(c.id=="EQ2") eq_off[2]=v; else if(c.id=="EQ3") eq_off[3]=v;
+        else if(c.id=="EQ4") eq_off[4]=v; else if(c.id=="OLV") olv=v;
+        else if(c.id=="OLT") olt=v; else if(c.id=="SPW") spw=v;
+        else if(c.id=="SPR") spr=v; else if(c.id=="SPD") spd=v;
+        else if(c.id=="TRM") trm_db=v;
     }
     AmountSnapshot s{};
-    s.autoeq_wet_mix     = amt * g_state->tone_meta.amt_autoeq.wet_mix_max;
-    s.sat_pre_db         = amt * g_state->tone_meta.amt_sat.pre_gain_db_max;
-    s.sat_post_db        = amt * g_state->tone_meta.amt_sat.post_gain_db_max;
-    s.sat_wet_mix        = amt * g_state->tone_meta.amt_sat.wet_mix_max;
-    const auto& la = g_state->tone_meta.amt_la2a;
-    float pr_raw       = la.peak_reduction_min + amt * (la.peak_reduction_max - la.peak_reduction_min);
-    s.la2a_pr_norm     = pr_raw / 100.0f;
-    s.la2a_comp_or_limit = la.comp_or_limit;
-    s.trim_lin         = std::pow(10.0f, trm_db / 20.0f);
+    s.lvl_wet=lvl; s.lvl_target_lufs=lvt;
+    s.out_lvl_wet=olv; s.out_lvl_target_lufs=olt;
+    s.sp_wet=spw; s.sp_rate=spr; s.sp_depth=spd;
+    s.sat_pre_db=sdr; s.sat_post_db=svo; s.sat_wet_mix=smx; s.sat_hpf_hz=shf;
+    s.sat_thresh_lin=std::pow(10.f, sth/20.f); s.sat_bias=sbs;
+    s.autoeq_wet_mix=eq*g_state->tone_meta.amt_autoeq.wet_mix_max;
+    for(int b=0;b<5;++b) s.eq_band_offsets[b]=eq_off[b];
+    s.la2a_wet=cmp/100.f; s.la2a_pr_norm=cmp/100.f;
+    s.la2a_comp_or_limit=cl;
+    s.trim_lin=std::pow(10.f,trm_db/20.f);
     return s;
 }
 
-void flush_block_(ChannelChain& ch, const AmountSnapshot& amt) {
-    // Scratch buffers reused per call (sized to kBlockSize at compile time).
-    std::array<float, kBlockSize> dry{};
-    std::array<float, kBlockSize> wet{};
-    std::array<float, kBlockSize> blk{};
+// Helpers for wet/dry blend into a buffer in-place.
+static void blend_(float* buf, const float* dry, const float* wet, float w, int n) {
+    for (int i=0;i<n;++i) buf[i]=(1.f-w)*dry[i]+w*wet[i];
+}
+static void blend_inplace_(float* buf, const float* wet, float w, int n) {
+    if (w>=1.f) { std::copy_n(wet,n,buf); return; }
+    for (int i=0;i<n;++i) buf[i]+=(wet[i]-buf[i])*w;
+}
 
-    // Stage 1: leveler — sample-by-sample, in place.
-    ch.leveler.process(ch.in_buf.data(), blk.data(), kBlockSize);
+// Unified stage-dispatch block processor.
+// Applies all user-orderable stages to work_l/work_r in plug.processor_order,
+// then writes through TruePeakCeiling into each chain's out_buf.
+void flush_chain_block_(Plugin& plug,
+                        float* work_l, float* work_r,
+                        uint32_t n_ch,
+                        const AmountSnapshot& amt) {
 
-    // Stage 2: auto-EQ — run controller ORT to get the per-block sigmoid
-    // params, then biquad cascade. Wet/dry blend with the leveler output.
-    std::array<float, 15> eq_params{};
-    ch.autoeq_ort->run_controller(blk.data(), kBlockSize, eq_params.data(), 15);
-    ch.autoeq_ort->swap_state();
-    ch.autoeq_eq.set_params(eq_params.data(), eq_params.size());
-    std::copy_n(blk.data(), kBlockSize, dry.data());
-    ch.autoeq_eq.process(blk.data(), wet.data(), kBlockSize);
-    for (int i = 0; i < kBlockSize; ++i) {
-        blk[i] = (1.0f - amt.autoeq_wet_mix) * dry[i] + amt.autoeq_wet_mix * wet[i];
+    static constexpr int   kGainCh[5]  = {0,3,6,9,12};
+    static constexpr float kGainMin    = -9.f;
+    static constexpr float kGainSpan   = 18.f;
+
+    std::array<float,kBlockSize> dry{}, wet_a{}, wet_b{};
+
+    for (int pos = 0; pos < kNumStages; ++pos) {
+        const int stage_idx = plug.processor_order[pos];
+        switch (static_cast<StageID>(stage_idx)) {
+
+        case StageID::InputLeveler: {
+            if (amt.lvl_wet <= 0.f) break;
+            plug.leveler.set_target(static_cast<double>(amt.lvl_target_lufs));
+            std::array<float,kBlockSize> lev_l{}, lev_r{};
+            if (n_ch >= 2) {
+                plug.leveler.process_linked(work_l, work_r,
+                                            lev_l.data(), lev_r.data(), kBlockSize);
+                blend_inplace_(work_l, lev_l.data(), amt.lvl_wet, kBlockSize);
+                blend_inplace_(work_r, lev_r.data(), amt.lvl_wet, kBlockSize);
+            } else {
+                plug.leveler.process(work_l, lev_l.data(), kBlockSize);
+                blend_inplace_(work_l, lev_l.data(), amt.lvl_wet, kBlockSize);
+            }
+            break;
+        }
+
+        case StageID::AutoEQ: {
+            float* ch_buf[2] = {work_l, work_r};
+            for (uint32_t ch=0; ch<n_ch; ++ch) {
+                float* blk = ch_buf[ch];
+                std::array<float,15> eq_params{};
+                plug.chains[ch].autoeq_ort->run_controller(blk,kBlockSize,eq_params.data(),15);
+                plug.chains[ch].autoeq_ort->swap_state();
+                for (int b=0;b<5;++b) {
+                    if (amt.eq_band_offsets[b]==0.f) continue;
+                    float& p=eq_params[kGainCh[b]];
+                    float db=kGainMin+p*kGainSpan+amt.eq_band_offsets[b];
+                    db=std::clamp(db,kGainMin,kGainMin+kGainSpan);
+                    p=(db-kGainMin)/kGainSpan;
+                }
+                plug.chains[ch].autoeq_eq.set_params(eq_params.data(),eq_params.size());
+                std::copy_n(blk,kBlockSize,dry.data());
+                plug.chains[ch].autoeq_eq.process(blk,wet_a.data(),kBlockSize);
+                blend_(blk,dry.data(),wet_a.data(),amt.autoeq_wet_mix,kBlockSize);
+            }
+            break;
+        }
+
+        case StageID::Saturator: {
+            const float pre  = std::pow(10.f, amt.sat_pre_db / 20.f);
+            const float pst  = std::pow(10.f, amt.sat_post_db / 20.f);
+            const float T    = amt.sat_thresh_lin;     // input axis scale (unity = 1.0)
+            const float invT = 1.f / T;
+            const bool  use_hpf = amt.sat_hpf_hz > 21.f;
+            float* ch_buf[2] = {work_l, work_r};
+            for (uint32_t ch = 0; ch < n_ch; ++ch) {
+                float* blk   = ch_buf[ch];
+                auto&  chain = plug.chains[ch];
+                // DC offset introduced by bias; subtracted after eval to keep output AC.
+                const float dc = static_cast<float>(
+                    chain.saturator.eval(static_cast<double>(amt.sat_bias)));
+                if (use_hpf) {
+                    // Recompute 1st-order bilinear HPF coefficients when fc changes.
+                    if (std::abs(amt.sat_hpf_hz - chain.sat_hpf_fc) > 0.5f) {
+                        const float K = std::tan(
+                            static_cast<float>(M_PI) * amt.sat_hpf_hz
+                            / static_cast<float>(plug.sample_rate));
+                        const float norm = 1.f / (1.f + K);
+                        chain.sat_hpf_b0 =  norm;
+                        chain.sat_hpf_b1 = -norm;
+                        chain.sat_hpf_a1 = (K - 1.f) * norm;
+                        chain.sat_hpf_fc = amt.sat_hpf_hz;
+                    }
+                    // Filter into wet_a (hi band); lo = blk - hi.
+                    for (int i = 0; i < kBlockSize; ++i) {
+                        const float x = blk[i];
+                        wet_a[i] = chain.sat_hpf_b0 * x
+                                 + chain.sat_hpf_b1 * chain.sat_hpf_x1
+                                 - chain.sat_hpf_a1 * chain.sat_hpf_y1;
+                        chain.sat_hpf_x1 = x;
+                        chain.sat_hpf_y1 = wet_a[i];
+                    }
+                    // Saturate hi band with threshold + bias into wet_b.
+                    for (int i = 0; i < kBlockSize; ++i) {
+                        const float x_in = wet_a[i] * pre * invT + amt.sat_bias;
+                        wet_b[i] = (static_cast<float>(chain.saturator.eval(
+                            static_cast<double>(x_in))) - dc) * T * pst;
+                    }
+                    // Recombine: lo + blend(hi_dry, hi_wet).
+                    for (int i = 0; i < kBlockSize; ++i)
+                        blk[i] = (blk[i] - wet_a[i])
+                                + (1.f - amt.sat_wet_mix) * wet_a[i]
+                                +         amt.sat_wet_mix  * wet_b[i];
+                } else {
+                    std::copy_n(blk, kBlockSize, dry.data());
+                    for (int i = 0; i < kBlockSize; ++i) {
+                        const float x_in = blk[i] * pre * invT + amt.sat_bias;
+                        wet_a[i] = (static_cast<float>(chain.saturator.eval(
+                            static_cast<double>(x_in))) - dc) * T * pst;
+                    }
+                    blend_(blk, dry.data(), wet_a.data(), amt.sat_wet_mix, kBlockSize);
+                }
+            }
+            break;
+        }
+
+        case StageID::Compressor: {
+            std::array<float,2> la2a_ctl{amt.la2a_comp_or_limit,amt.la2a_pr_norm};
+            float* ch_buf[2]={work_l,work_r};
+            for (uint32_t ch=0;ch<n_ch;++ch) {
+                float* blk=ch_buf[ch];
+                std::copy_n(blk,kBlockSize,dry.data());
+                plug.chains[ch].la2a_ort->run(blk,kBlockSize,
+                    wet_a.data(),kBlockSize,
+                    la2a_ctl.data(),2,"audio_out");
+                plug.chains[ch].la2a_ort->swap_state();
+                blend_inplace_(wet_a.data(),dry.data(),1.f-amt.la2a_wet,kBlockSize);
+                std::copy_n(wet_a.data(),kBlockSize,blk);
+            }
+            break;
+        }
+
+        case StageID::OutputLeveler: {
+            if (amt.out_lvl_wet <= 0.f) break;
+            plug.out_leveler.set_target(static_cast<double>(amt.out_lvl_target_lufs));
+            std::array<float,kBlockSize> ol_l{},ol_r{};
+            if (n_ch >= 2) {
+                plug.out_leveler.process_linked(work_l,work_r,
+                                                ol_l.data(),ol_r.data(),kBlockSize);
+                blend_inplace_(work_l,ol_l.data(),amt.out_lvl_wet,kBlockSize);
+                blend_inplace_(work_r,ol_r.data(),amt.out_lvl_wet,kBlockSize);
+            } else {
+                plug.out_leveler.process(work_l,ol_l.data(),kBlockSize);
+                blend_inplace_(work_l,ol_l.data(),amt.out_lvl_wet,kBlockSize);
+            }
+            break;
+        }
+
+        case StageID::SpatialD: {
+            if (amt.sp_wet <= 0.f || n_ch < 2) break;
+            std::array<float,kBlockSize> sp_l{},sp_r{};
+            plug.dimension_d.set_params(static_cast<double>(amt.sp_rate),
+                                         static_cast<double>(amt.sp_depth));
+            plug.dimension_d.process(work_l,work_r,sp_l.data(),sp_r.data(),kBlockSize);
+            blend_inplace_(work_l,sp_l.data(),amt.sp_wet,kBlockSize);
+            blend_inplace_(work_r,sp_r.data(),amt.sp_wet,kBlockSize);
+            break;
+        }
+        } // switch
+
+        // Capture stage output for the spectrum analyzer.
+        plug.spectrum.push(pos, work_l, work_r, n_ch, kBlockSize);
+    } // for stage
+
+    // When a full 2048-sample frame has accumulated, hand off to the main thread.
+    if (plug.spectrum.advance_and_transfer())
+        plug.host->request_callback(plug.host);
+
+    // Trim + TruePeakCeiling — always last, not user-reorderable.
+    if (amt.trim_lin != 1.f) {
+        for (int i=0;i<kBlockSize;++i) work_l[i]*=amt.trim_lin;
+        if (n_ch>=2) for (int i=0;i<kBlockSize;++i) work_r[i]*=amt.trim_lin;
     }
-
-    // Stage 3: saturator — pre/post gain + wet/dry mix.
-    const float pre_lin  = std::pow(10.0f, amt.sat_pre_db  / 20.0f);
-    const float post_lin = std::pow(10.0f, amt.sat_post_db / 20.0f);
-    std::copy_n(blk.data(), kBlockSize, dry.data());
-    for (int i = 0; i < kBlockSize; ++i) {
-        wet[i] = static_cast<float>(ch.saturator.eval(static_cast<double>(blk[i] * pre_lin))) * post_lin;
+    for (uint32_t ch=0;ch<n_ch;++ch) {
+        float* blk=(ch==0)?work_l:work_r;
+        plug.chains[ch].ceiling.process(blk,plug.chains[ch].out_buf.data(),kBlockSize);
+        plug.chains[ch].out_avail=kBlockSize;
+        plug.chains[ch].out_read=0;
     }
-    for (int i = 0; i < kBlockSize; ++i) {
-        blk[i] = (1.0f - amt.sat_wet_mix) * dry[i] + amt.sat_wet_mix * wet[i];
-    }
-
-    // Stage 4: LA-2A LSTM with controls = [C, P_norm].
-    std::array<float, 2> la2a_controls{amt.la2a_comp_or_limit, amt.la2a_pr_norm};
-    ch.la2a_ort->run(blk.data(), kBlockSize,
-                     wet.data(), kBlockSize,
-                     la2a_controls.data(), 2,
-                     /*audio_out_name=*/"audio_out");
-    ch.la2a_ort->swap_state();
-
-    // Stage 5: ceiling — sample-by-sample, in place.
-    ch.ceiling.process(wet.data(), ch.out_buf.data(), kBlockSize);
-    ch.out_avail = kBlockSize;
-    ch.out_read  = 0;
 }
 
 }  // namespace
@@ -633,60 +1025,237 @@ static void apply_events_(Plugin* plug, const clap_input_events_t* in_events) {
     }
 }
 
+// GUI-thread callbacks — write pending changes into thread-safe queues.
+static void tone_on_param_change(void* plug_ptr, const char* param_id, float value) {
+    auto* plug = static_cast<Plugin*>(plug_ptr);
+    for (size_t i = 0; i < plug->meta->controls.size(); ++i) {
+        if (plug->meta->controls[i].id == param_id) {
+            std::lock_guard<std::mutex> lk(plug->param_mutex);
+            plug->param_queue.emplace_back(static_cast<int>(i), value);
+            break;
+        }
+    }
+}
+static void tone_on_order_change(void* plug_ptr, const int* order, int count) {
+    auto* plug = static_cast<Plugin*>(plug_ptr);
+    if (count != kNumStages) return;
+    std::lock_guard<std::mutex> lk(plug->order_mutex);
+    for (int i = 0; i < kNumStages; ++i) plug->pending_order[i] = order[i];
+    plug->order_pending = true;
+}
+
 static clap_process_status plugin_process(const clap_plugin_t* p, const clap_process_t* process) {
     auto* plug = static_cast<Plugin*>(p->plugin_data);
     apply_events_(plug, process->in_events);
 
+    // Drain GUI param queue (try_lock — never blocks audio thread).
+    {
+        std::unique_lock<std::mutex> lk(plug->param_mutex, std::try_to_lock);
+        if (lk.owns_lock() && !plug->param_queue.empty()) {
+            for (auto& [idx, val] : plug->param_queue)
+                plug->control_values[idx] = val;
+            plug->param_queue.clear();
+        }
+    }
+    // Drain GUI order change.
+    {
+        std::unique_lock<std::mutex> lk(plug->order_mutex, std::try_to_lock);
+        if (lk.owns_lock() && plug->order_pending) {
+            plug->processor_order = plug->pending_order;
+            plug->order_pending = false;
+        }
+    }
+
     const uint32_t n_frames = process->frames_count;
     if (n_frames == 0) return CLAP_PROCESS_CONTINUE;
-    if (process->audio_inputs_count == 0 || process->audio_outputs_count == 0) {
+    if (process->audio_inputs_count == 0 || process->audio_outputs_count == 0)
         return CLAP_PROCESS_ERROR;
-    }
 
     const float* const* in_ch  = process->audio_inputs[0].data32;
     float* const*       out_ch = process->audio_outputs[0].data32;
-    const uint32_t in_channels  = std::min<uint32_t>(plug->channels, process->audio_inputs[0].channel_count);
-    const uint32_t out_channels = std::min<uint32_t>(plug->channels, process->audio_outputs[0].channel_count);
+    const uint32_t n_ch = std::min<uint32_t>(
+        static_cast<uint32_t>(plug->chains.size()),
+        std::min(process->audio_inputs[0].channel_count,
+                 process->audio_outputs[0].channel_count));
+    if (n_ch == 0) return CLAP_PROCESS_ERROR;
 
     AmountSnapshot amt = resolve_amount_(*plug);
 
-    for (uint32_t ch = 0; ch < in_channels && ch < out_channels; ++ch) {
-        auto& chain = plug->chains[ch];
-        const float* in_p = in_ch[ch];
-        float*       out_p = out_ch[ch];
-        uint32_t     i = 0;
+    // All channels fill/drain at the same rate, so use one shared in_pos/out_pos.
+    uint32_t in_pos = 0, out_pos = 0;
 
-        while (i < n_frames) {
-            // Drain output ring first.
-            while (i < n_frames && chain.out_read < chain.out_avail) {
-                out_p[i++] = chain.out_buf[chain.out_read++];
-            }
-            if (i >= n_frames) break;
-
-            // Push input samples until we either fill the input block or
-            // exhaust the host frames.
-            const uint32_t take = std::min<uint32_t>(n_frames - i, kBlockSize - chain.in_fill);
-            std::copy_n(in_p + i, take, chain.in_buf.data() + chain.in_fill);
-            i              += take;
-            chain.in_fill  += take;
-
-            if (chain.in_fill == kBlockSize) {
-                flush_block_(chain, amt);
-                chain.in_fill = 0;
-            }
+    while (out_pos < n_frames) {
+        // Drain all channels' output rings together.
+        while (out_pos < n_frames && plug->chains[0].out_read < plug->chains[0].out_avail) {
+            for (uint32_t ch = 0; ch < n_ch; ++ch)
+                out_ch[ch][out_pos] = plug->chains[ch].out_buf[plug->chains[ch].out_read];
+            for (uint32_t ch = 0; ch < n_ch; ++ch)
+                ++plug->chains[ch].out_read;
+            ++out_pos;
         }
+        if (out_pos >= n_frames) break;
+
+        if (in_pos >= n_frames) {
+            while (out_pos < n_frames) {
+                for (uint32_t ch = 0; ch < n_ch; ++ch) out_ch[ch][out_pos] = 0.0f;
+                ++out_pos;
+            }
+            break;
+        }
+
+        // Push input into all channels' accumulators simultaneously.
+        const uint32_t take = std::min<uint32_t>(
+            n_frames - in_pos,
+            static_cast<uint32_t>(kBlockSize - plug->chains[0].in_fill));
+        for (uint32_t ch = 0; ch < n_ch; ++ch) {
+            std::copy_n(in_ch[ch] + in_pos,
+                        take,
+                        plug->chains[ch].in_buf.data() + plug->chains[ch].in_fill);
+            plug->chains[ch].in_fill += take;
+        }
+        in_pos += take;
+
+        if (plug->chains[0].in_fill < kBlockSize) {
+            // Accumulator not yet full — pad output with zeros.
+            while (out_pos < n_frames) {
+                for (uint32_t ch = 0; ch < n_ch; ++ch) out_ch[ch][out_pos] = 0.0f;
+                ++out_pos;
+            }
+            break;
+        }
+
+        // Blocks are full — run the unified stage chain.
+        std::array<float, kBlockSize> work_l{}, work_r{};
+        std::copy_n(plug->chains[0].in_buf.data(), kBlockSize, work_l.data());
+        if (n_ch >= 2) std::copy_n(plug->chains[1].in_buf.data(), kBlockSize, work_r.data());
+        flush_chain_block_(*plug, work_l.data(), work_r.data(), n_ch, amt);
+        for (uint32_t ch = 0; ch < n_ch; ++ch)
+            plug->chains[ch].in_fill = 0;
     }
     return CLAP_PROCESS_CONTINUE;
 }
+
+// ---------------------------------------------------------------------------
+// GUI extension  (CLAP_EXT_GUI, CLAP_WINDOW_API_COCOA)
+// ---------------------------------------------------------------------------
+
+static void gui_send_full_state_(Plugin* plug) {
+    if (!plug->gui_state) return;
+    const size_t n = plug->meta->controls.size();
+    std::vector<ToneParamInfo> params(n);
+    for (size_t i = 0; i < n; ++i) {
+        const auto& c = plug->meta->controls[i];
+        params[i].id            = c.id.c_str();
+        params[i].name          = c.name.c_str();
+        params[i].min           = c.min;
+        params[i].max           = c.max;
+        params[i].def           = c.def;
+        params[i].unit          = c.unit.c_str();
+        params[i].current_value = plug->control_values[i];
+    }
+    tone_gui_send_init(plug->gui_state,
+                       params.data(), static_cast<int>(n),
+                       plug->processor_order.data(), kNumStages);
+}
+
+static bool gui_is_api_supported(const clap_plugin_t*, const char* api, bool is_floating) {
+    return !is_floating && std::strcmp(api, CLAP_WINDOW_API_COCOA) == 0;
+}
+static bool gui_get_preferred_api(const clap_plugin_t*, const char** api, bool* is_floating) {
+    *api = CLAP_WINDOW_API_COCOA;
+    *is_floating = false;
+    return true;
+}
+static bool gui_create(const clap_plugin_t* p, const char* api, bool is_floating) {
+    if (!gui_is_api_supported(p, api, is_floating)) return false;
+    auto* plug = static_cast<Plugin*>(p->plugin_data);
+    if (plug->gui_state) return true;  // already exists
+    plug->gui_state = tone_gui_create(
+        plug,
+        g_state->resources_dir.c_str(),
+        tone_on_param_change,
+        tone_on_order_change);
+    return plug->gui_state != nullptr;
+}
+static void gui_destroy_fn(const clap_plugin_t* p) {
+    auto* plug = static_cast<Plugin*>(p->plugin_data);
+    tone_gui_destroy(plug->gui_state);
+    plug->gui_state = nullptr;
+}
+static bool gui_set_scale(const clap_plugin_t*, double) { return false; }
+static bool gui_get_size(const clap_plugin_t*, uint32_t* w, uint32_t* h) {
+    tone_gui_get_size(w, h);
+    return true;
+}
+static bool gui_can_resize(const clap_plugin_t*) { return false; }
+static bool gui_get_resize_hints(const clap_plugin_t*, clap_gui_resize_hints_t* hints) {
+    hints->can_resize_horizontally = false;
+    hints->can_resize_vertically   = false;
+    hints->preserve_aspect_ratio   = false;
+    hints->aspect_ratio_width  = 700;
+    hints->aspect_ratio_height = 460;
+    return false;
+}
+static bool gui_adjust_size(const clap_plugin_t*, uint32_t* w, uint32_t* h) {
+    tone_gui_get_size(w, h);
+    return true;
+}
+static bool gui_set_size(const clap_plugin_t*, uint32_t, uint32_t) { return true; }
+static bool gui_set_parent(const clap_plugin_t* p, const clap_window_t* window) {
+    auto* plug = static_cast<Plugin*>(p->plugin_data);
+    if (!plug->gui_state) return false;
+    return tone_gui_set_parent(plug->gui_state, window->cocoa);
+}
+static bool gui_set_transient(const clap_plugin_t*, const clap_window_t*) { return false; }
+static void gui_suggest_title(const clap_plugin_t*, const char*) {}
+static bool gui_show(const clap_plugin_t* p) {
+    auto* plug = static_cast<Plugin*>(p->plugin_data);
+    if (!plug->gui_state) return false;
+    gui_send_full_state_(plug);
+    tone_gui_show(plug->gui_state);
+    return true;
+}
+static bool gui_hide(const clap_plugin_t* p) {
+    auto* plug = static_cast<Plugin*>(p->plugin_data);
+    tone_gui_hide(plug->gui_state);
+    return true;
+}
+
+static const clap_plugin_gui_t s_ext_gui = {
+    gui_is_api_supported,
+    gui_get_preferred_api,
+    gui_create,
+    gui_destroy_fn,
+    gui_set_scale,
+    gui_get_size,
+    gui_can_resize,
+    gui_get_resize_hints,
+    gui_adjust_size,
+    gui_set_size,
+    gui_set_parent,
+    gui_set_transient,
+    gui_suggest_title,
+    gui_show,
+    gui_hide,
+};
 
 static const void* plugin_get_extension(const clap_plugin_t*, const char* id) {
     if (std::strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) return &s_ext_audio_ports;
     if (std::strcmp(id, CLAP_EXT_PARAMS)       == 0) return &s_ext_params;
     if (std::strcmp(id, CLAP_EXT_LATENCY)      == 0) return &s_ext_latency;
+    if (std::strcmp(id, CLAP_EXT_STATE)        == 0) return &s_ext_state;
+    if (std::strcmp(id, CLAP_EXT_GUI)          == 0) return &s_ext_gui;
     return nullptr;
 }
 
-static void plugin_on_main_thread(const clap_plugin_t*) {}
+static void plugin_on_main_thread(const clap_plugin_t* p) {
+    auto* plug = static_cast<Plugin*>(p->plugin_data);
+    if (!plug->gui_state) return;
+    if (plug->spectrum.process_if_ready(plug->sample_rate)) {
+        const std::string js = plug->spectrum.build_js(plug->processor_order);
+        tone_gui_eval_js(plug->gui_state, js.c_str());
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Factory + entry

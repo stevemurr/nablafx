@@ -43,6 +43,9 @@ public:
     // Call on activate(). Safe to call mid-stream to reset state.
     void reset(double sample_rate, double target_lufs);
 
+    // Update the LUFS target without resetting filter or gain state.
+    void set_target(double target_lufs) { target_lufs_ = target_lufs; }
+
     // Process one mono buffer; output may alias input.
     void process(const float* in, float* out, std::size_t n);
 

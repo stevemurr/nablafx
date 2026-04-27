@@ -69,16 +69,16 @@ fi
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$HERE/build"
 
-# Configure + build both dylibs once.
-NEED_BUILD=0
-[ -f "$BUILD_DIR/build_config.sh" ] || NEED_BUILD=1
-[ -f "$BUILD_DIR/nablafx_clap.so" ] || NEED_BUILD=1
-[ -f "$BUILD_DIR/tone_clap.so"    ] || NEED_BUILD=1
-if [ "$NEED_BUILD" -eq 1 ]; then
+# Configure if needed; always build so source changes are picked up.
+NEED_CONFIGURE=0
+[ -f "$BUILD_DIR/build_config.sh" ] || NEED_CONFIGURE=1
+[ -f "$BUILD_DIR/nablafx_clap.so" ] || NEED_CONFIGURE=1
+[ -f "$BUILD_DIR/tone_clap.so"    ] || NEED_CONFIGURE=1
+if [ "$NEED_CONFIGURE" -eq 1 ]; then
     cmake -S "$HERE" -B "$BUILD_DIR" -G "Unix Makefiles" \
         -DCMAKE_BUILD_TYPE=Release
-    cmake --build "$BUILD_DIR" -j
 fi
+cmake --build "$BUILD_DIR" -j
 
 # shellcheck disable=SC1091
 . "$BUILD_DIR/build_config.sh"
@@ -126,6 +126,8 @@ else
     for sub in auto_eq saturator la2a; do
         cp -R "$STAGING/$sub" "$OUT/Contents/Resources/"
     done
+    # Copy the WebUI so the plugin can load it at runtime.
+    cp -R "$HERE/ui" "$OUT/Contents/Resources/"
 fi
 
 BUNDLE_ID="com.nablafx.$MODEL_ID"

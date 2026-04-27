@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TONE</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:      #111111;
+    --surface: #1e1e1e;
+    --border:  #2a2a2a;
+    --accent:  #2a9d8f;
+    --text:    #dddddd;
+    --dim:     #666666;
+    --track:   #2a2a2a;
+    --danger:  #e76f51;
+  }
+
+  html, body {
+    width: 700px; height: 560px;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+    font-size: 11px;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* ── Header ─────────────────────────────────────────────── */
+  #header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 40px;
+    padding: 0 14px 0 16px;
+    background: #0d0d0d;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  #logo {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    color: var(--text);
+  }
+  #logo span { color: var(--accent); }
+  #header-trim {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #header-trim .trim-label {
+    font-size: 10px;
+    color: var(--dim);
+    letter-spacing: 0.1em;
+  }
+
+  /* ── Chain strip ─────────────────────────────────────────── */
+  #chain {
+    display: flex;
+    align-items: center;
+    height: 72px;
+    padding: 0 12px;
+    background: #141414;
+    border-bottom: 1px solid var(--border);
+    gap: 0;
+    flex-shrink: 0;
+    overflow-x: auto;
+  }
+  #chain::-webkit-scrollbar { display: none; }
+
+  .arrow {
+    color: var(--dim);
+    font-size: 14px;
+    padding: 0 4px;
+    flex-shrink: 0;
+  }
+
+  .proc-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 80px;
+    height: 52px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: border-color 0.12s, background 0.12s;
+    gap: 5px;
+    position: relative;
+  }
+  .proc-card:hover { background: #252525; }
+  .proc-card.selected {
+    border-color: var(--accent);
+    background: #1a2e2c;
+  }
+  .proc-card.drag-over { border-color: var(--accent); opacity: 0.7; }
+  .proc-card[draggable="true"] { cursor: grab; }
+
+  .proc-name {
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    color: var(--text);
+    text-align: center;
+  }
+  .proc-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--border);
+    transition: background 0.2s;
+  }
+  .proc-dot.active { background: var(--accent); }
+
+  /* ── Control surface ─────────────────────────────────────── */
+  #surface {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 14px 20px 12px;
+    overflow: hidden;
+  }
+  #surface-title {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    color: var(--dim);
+    margin-bottom: 14px;
+  }
+  #controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 18px;
+    align-items: flex-start;
+  }
+
+  /* ── Knob ────────────────────────────────────────────────── */
+  .knob-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    cursor: ns-resize;
+  }
+  .knob-wrap svg { display: block; }
+  .knob-label {
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    color: var(--dim);
+    text-align: center;
+    max-width: 70px;
+  }
+  .knob-value {
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--accent);
+    text-align: center;
+    min-height: 12px;
+    max-width: 70px;
+  }
+
+  /* ── Toggle button (C_L) ─────────────────────────────────── */
+  .toggle-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .toggle-btn {
+    width: 60px; height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    background: var(--surface);
+    color: var(--dim);
+    transition: all 0.12s;
+  }
+  .toggle-btn.on {
+    border-color: var(--accent);
+    background: #1a2e2c;
+    color: var(--accent);
+  }
+  .toggle-label {
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    color: var(--dim);
+    text-align: center;
+  }
+  .toggle-value {
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--accent);
+    text-align: center;
+    min-height: 12px;
+  }
+
+  /* ── Spectrum view ───────────────────────────────────────── */
+  #spectrum-view {
+    height: 110px;
+    flex-shrink: 0;
+    background: #0d0d0d;
+    border-bottom: 1px solid var(--border);
+    padding: 6px 12px 6px;
+    position: relative;
+  }
+  #spectrum-canvas {
+    display: block;
+    width: 676px;
+    height: 98px;
+  }
+
+  /* ── Layout shell ────────────────────────────────────────── */
+  #app {
+    display: flex;
+    flex-direction: column;
+    width: 700px;
+    height: 560px;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="header">
+    <div id="logo">T<span>O</span>NE</div>
+    <div id="header-trim">
+      <span class="trim-label">TRIM</span>
+      <div id="trim-knob-slot"></div>
+    </div>
+  </div>
+  <div id="chain"></div>
+  <div id="spectrum-view">
+    <canvas id="spectrum-canvas" width="676" height="98"></canvas>
+  </div>
+  <div id="surface">
+    <div id="surface-title">SELECT A PROCESSOR</div>
+    <div id="controls"></div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// DATA MODEL
+// ============================================================
+
+const PROCESSORS = [
+  { id: 0, name: 'IN LEVEL',  params: ['LVL', 'LVT'],              wetParams: ['LVL'] },
+  { id: 1, name: 'AUTO EQ',   params: ['EQ', 'EQ0','EQ1','EQ2','EQ3','EQ4'], wetParams: ['EQ'] },
+  { id: 2, name: 'SATURATOR', params: ['SDR', 'SVO', 'SMX', 'SHF', 'STH', 'SBS'], wetParams: ['SMX'] },
+  { id: 3, name: 'COMPRESSOR',params: ['C_L', 'CMP'],              wetParams: ['CMP'] },
+  { id: 4, name: 'OUT LEVEL', params: ['OLV', 'OLT'],              wetParams: ['OLV'] },
+  { id: 5, name: 'SPATIAL D', params: ['SPW', 'SPR', 'SPD'],       wetParams: ['SPW'] },
+];
+
+// Runtime state
+let paramMeta   = {};   // id → { name, min, max, def, unit }
+let paramValues = {};   // id → float
+let procOrder   = [0,1,2,3,4,5];
+let selectedProc = 0;
+
+// ============================================================
+// VALUE FORMATTING
+// ============================================================
+
+function formatValue(id, val) {
+  const m = paramMeta[id];
+  if (!m) return val.toFixed(2);
+  const unit = m.unit;
+
+  if (unit === 'dB') {
+    const s = val >= 0 ? '+' : '';
+    return `${s}${val.toFixed(1)} dB`;
+  }
+  if (unit === 'LUFS') return `${val.toFixed(1)} L`;
+  if (unit === 'Hz')   return `${val.toFixed(2)} Hz`;
+  if (unit === 'switch') return val >= 0.5 ? 'LIMIT' : 'COMP';
+  if (unit === '' && m.max <= 1) return `${Math.round(val * 100)}%`;
+  return val.toFixed(2);
+}
+
+// ============================================================
+// HOST COMMUNICATION
+// ============================================================
+
+function sendParam(id, value) {
+  if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.tone) {
+    window.webkit.messageHandlers.tone.postMessage({ type: 'setParam', id, value });
+  }
+  paramValues[id] = value;
+  refreshKnob(id);
+  refreshChain();
+}
+
+function sendOrderToHost(order) {
+  if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.tone) {
+    window.webkit.messageHandlers.tone.postMessage({ type: 'reorder', order });
+  }
+}
+
+// ============================================================
+// KNOB SVG
+// ============================================================
+
+const KNOB_R   = 26;
+const KNOB_CX  = 30;
+const KNOB_CY  = 32;
+const ARC_MIN  = -135; // degrees from top (clock-wise from bottom-left)
+const ARC_MAX  =  135;
+
+function degToRad(d) { return d * Math.PI / 180; }
+
+// Polar helper — angle 0 = top, positive = clockwise
+function polarPt(cx, cy, r, angleDeg) {
+  const rad = degToRad(angleDeg - 90);
+  return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
+}
+
+function describeArc(cx, cy, r, startDeg, endDeg) {
+  if (Math.abs(endDeg - startDeg) >= 360) {
+    // Full circle
+    return `M ${cx - r} ${cy} A ${r} ${r} 0 1 1 ${cx + r} ${cy} A ${r} ${r} 0 1 1 ${cx - r} ${cy}`;
+  }
+  const [sx, sy] = polarPt(cx, cy, r, startDeg);
+  const [ex, ey] = polarPt(cx, cy, r, endDeg);
+  const large    = (endDeg - startDeg + 360) % 360 > 180 ? 1 : 0;
+  return `M ${sx} ${sy} A ${r} ${r} 0 ${large} 1 ${ex} ${ey}`;
+}
+
+function normalise(id) {
+  const m = paramMeta[id];
+  if (!m || m.max === m.min) return 0;
+  return Math.max(0, Math.min(1, (paramValues[id] - m.min) / (m.max - m.min)));
+}
+
+function buildKnobSVG(id) {
+  const t   = normalise(id);
+  const ang = ARC_MIN + t * (ARC_MAX - ARC_MIN);
+
+  const trackPath = describeArc(KNOB_CX, KNOB_CY, KNOB_R, ARC_MIN, ARC_MAX);
+  const fillPath  = Math.abs(ang - ARC_MIN) < 1
+    ? ''
+    : describeArc(KNOB_CX, KNOB_CY, KNOB_R, ARC_MIN, ang);
+
+  const [dx, dy] = polarPt(KNOB_CX, KNOB_CY, KNOB_R, ang);
+
+  return `<svg width="60" height="64" viewBox="0 0 60 64" xmlns="http://www.w3.org/2000/svg">
+    <path d="${trackPath}" fill="none" stroke="#2a2a2a" stroke-width="3" stroke-linecap="round"/>
+    ${fillPath ? `<path d="${fillPath}" fill="none" stroke="#2a9d8f" stroke-width="3" stroke-linecap="round"/>` : ''}
+    <circle cx="${KNOB_CX}" cy="${KNOB_CY}" r="14" fill="#1e1e1e" stroke="#333" stroke-width="1"/>
+    <circle cx="${dx.toFixed(2)}" cy="${dy.toFixed(2)}" r="2.5" fill="#fff"/>
+  </svg>`;
+}
+
+// ============================================================
+// KNOB INTERACTION
+// ============================================================
+
+let activeDrag = null; // { id, startY, startVal, norm }
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+function onKnobMouseDown(e, id) {
+  e.preventDefault();
+  const m = paramMeta[id];
+  if (!m) return;
+  activeDrag = {
+    id,
+    startY:   e.clientY,
+    startVal: paramValues[id] ?? m.def,
+  };
+  window.addEventListener('mousemove', onKnobMouseMove, { passive: false });
+  window.addEventListener('mouseup',   onKnobMouseUp);
+}
+
+function onKnobMouseMove(e) {
+  if (!activeDrag) return;
+  e.preventDefault();
+  const { id, startY, startVal } = activeDrag;
+  const m = paramMeta[id];
+  const dy = startY - e.clientY; // up = positive
+  const delta = dy / 200 * (m.max - m.min);
+  const newVal = clamp(startVal + delta, m.min, m.max);
+  paramValues[id] = newVal;
+  refreshKnob(id);
+  refreshChain();
+  sendParam(id, newVal);
+}
+
+function onKnobMouseUp() {
+  activeDrag = null;
+  window.removeEventListener('mousemove', onKnobMouseMove);
+  window.removeEventListener('mouseup',   onKnobMouseUp);
+}
+
+function onKnobDblClick(id) {
+  const m = paramMeta[id];
+  if (!m) return;
+  paramValues[id] = m.def;
+  sendParam(id, m.def);
+  refreshKnob(id);
+  refreshChain();
+}
+
+// Refresh a single knob's SVG and value text in-place
+function refreshKnob(id) {
+  const el = document.querySelector(`.knob-wrap[data-id="${id}"]`);
+  if (!el) return;
+  el.querySelector('svg').outerHTML; // force query
+  const svgSlot = el.querySelector('.knob-svg-slot');
+  if (svgSlot) svgSlot.innerHTML = buildKnobSVG(id);
+  const valEl = el.querySelector('.knob-value');
+  if (valEl) valEl.textContent = formatValue(id, paramValues[id] ?? paramMeta[id]?.def ?? 0);
+}
+
+// ============================================================
+// TOGGLE INTERACTION (C_L)
+// ============================================================
+
+function onToggleClick(id) {
+  const m = paramMeta[id];
+  if (!m) return;
+  const cur = paramValues[id] ?? m.def;
+  const next = cur >= 0.5 ? 0 : 1;
+  paramValues[id] = next;
+  sendParam(id, next);
+  refreshToggle(id);
+}
+
+function refreshToggle(id) {
+  const el = document.querySelector(`.toggle-wrap[data-id="${id}"]`);
+  if (!el) return;
+  const val = paramValues[id] ?? 0;
+  const btn  = el.querySelector('.toggle-btn');
+  const valEl = el.querySelector('.toggle-value');
+  const isLimit = val >= 0.5;
+  btn.textContent = isLimit ? 'LIMIT' : 'COMP';
+  btn.classList.toggle('on', isLimit);
+  if (valEl) valEl.textContent = isLimit ? 'LIMIT' : 'COMP';
+}
+
+// ============================================================
+// BUILD CONTROL FOR A PARAM
+// ============================================================
+
+function buildControl(id) {
+  const m = paramMeta[id];
+  if (!m) return null;
+
+  if (id === 'C_L') {
+    // Toggle button
+    const wrap = document.createElement('div');
+    wrap.className = 'toggle-wrap';
+    wrap.dataset.id = id;
+
+    const val = paramValues[id] ?? m.def;
+    const isLimit = val >= 0.5;
+
+    wrap.innerHTML = `
+      <div class="toggle-btn${isLimit ? ' on' : ''}">${isLimit ? 'LIMIT' : 'COMP'}</div>
+      <div class="toggle-label">${m.name}</div>
+      <div class="toggle-value">${formatValue(id, val)}</div>
+    `;
+    wrap.querySelector('.toggle-btn').addEventListener('click', () => onToggleClick(id));
+    return wrap;
+  }
+
+  // Standard knob
+  const wrap = document.createElement('div');
+  wrap.className = 'knob-wrap';
+  wrap.dataset.id = id;
+
+  const val = paramValues[id] ?? m.def;
+  wrap.innerHTML = `
+    <div class="knob-svg-slot">${buildKnobSVG(id)}</div>
+    <div class="knob-label">${m.name}</div>
+    <div class="knob-value">${formatValue(id, val)}</div>
+  `;
+
+  wrap.addEventListener('mousedown', e => onKnobMouseDown(e, id));
+  wrap.addEventListener('dblclick',  () => onKnobDblClick(id));
+
+  return wrap;
+}
+
+// ============================================================
+// RENDER CONTROL SURFACE
+// ============================================================
+
+function renderSurface() {
+  const proc = PROCESSORS.find(p => p.id === selectedProc);
+  const title = document.getElementById('surface-title');
+  const controls = document.getElementById('controls');
+  controls.innerHTML = '';
+
+  if (!proc) {
+    title.textContent = 'SELECT A PROCESSOR';
+    return;
+  }
+
+  title.textContent = proc.name;
+
+  for (const id of proc.params) {
+    const ctrl = buildControl(id);
+    if (ctrl) controls.appendChild(ctrl);
+  }
+}
+
+// ============================================================
+// CHAIN STRIP
+// ============================================================
+
+function isProcActive(proc) {
+  return proc.wetParams.some(id => {
+    const m = paramMeta[id];
+    const v = paramValues[id] ?? (m ? m.def : 0);
+    return v > 0;
+  });
+}
+
+let dragSrcIndex = null;
+
+function renderChain() {
+  const chain = document.getElementById('chain');
+  chain.innerHTML = '';
+
+  procOrder.forEach((procId, i) => {
+    if (i > 0) {
+      const arrow = document.createElement('span');
+      arrow.className = 'arrow';
+      arrow.textContent = '›';
+      chain.appendChild(arrow);
+    }
+
+    const proc   = PROCESSORS.find(p => p.id === procId);
+    const active = isProcActive(proc);
+
+    const card = document.createElement('div');
+    card.className = 'proc-card' + (procId === selectedProc ? ' selected' : '');
+    card.draggable  = true;
+    card.dataset.index = i;
+
+    card.innerHTML = `
+      <div class="proc-name">${proc.name}</div>
+      <div class="proc-dot${active ? ' active' : ''}"></div>
+    `;
+
+    card.addEventListener('click', () => {
+      selectedProc = procId;
+      renderChain();
+      renderSurface();
+    });
+
+    card.addEventListener('dragstart', e => {
+      dragSrcIndex = i;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(i));
+      card.style.opacity = '0.5';
+    });
+    card.addEventListener('dragend', () => {
+      card.style.opacity = '1';
+    });
+    card.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      card.classList.add('drag-over');
+    });
+    card.addEventListener('dragleave', () => {
+      card.classList.remove('drag-over');
+    });
+    card.addEventListener('drop', e => {
+      e.preventDefault();
+      card.classList.remove('drag-over');
+      const destIndex = parseInt(card.dataset.index, 10);
+      if (dragSrcIndex === null || dragSrcIndex === destIndex) return;
+
+      // Reorder
+      const newOrder = [...procOrder];
+      const [moved]  = newOrder.splice(dragSrcIndex, 1);
+      newOrder.splice(destIndex, 0, moved);
+      procOrder   = newOrder;
+      dragSrcIndex = null;
+
+      sendOrderToHost(procOrder);
+      renderChain();
+    });
+
+    chain.appendChild(card);
+  });
+}
+
+function refreshChain() {
+  // Only update dot activeness without full rebuild
+  procOrder.forEach((procId, i) => {
+    const proc  = PROCESSORS.find(p => p.id === procId);
+    const dot   = document.querySelectorAll('.proc-dot')[i];
+    if (dot) dot.classList.toggle('active', isProcActive(proc));
+  });
+}
+
+// ============================================================
+// HEADER TRIM KNOB
+// ============================================================
+
+function renderTrimKnob() {
+  const slot = document.getElementById('trim-knob-slot');
+  const ctrl = buildControl('TRM');
+  if (ctrl && slot) {
+    slot.innerHTML = '';
+    slot.appendChild(ctrl);
+  }
+}
+
+function refreshTrimKnob() {
+  refreshKnob('TRM');
+}
+
+// ============================================================
+// PUBLIC API  (called from C++ via evaluateJavaScript)
+// ============================================================
+
+window.toneInit = function(state) {
+  paramMeta   = state.paramMeta   || {};
+  paramValues = state.paramValues || {};
+  procOrder   = state.processorOrder || [0,1,2,3,4,5];
+  selectedProc = procOrder[0] ?? 0;
+
+  renderTrimKnob();
+  renderChain();
+  renderSurface();
+};
+
+// ============================================================
+// SPECTRUM DISPLAY
+// ============================================================
+
+(function() {
+  const KDISP = 128;
+  const FLO = 20, FHI = 20000;
+
+  // Log-spaced display frequencies (Hz).
+  const dispFreqs = Array.from({length: KDISP}, (_, i) =>
+    FLO * Math.pow(FHI / FLO, i / (KDISP - 1)));
+
+  // One color per StageID.
+  const STAGE_COLORS = [
+    '#4cc9a8',  // 0 InputLeveler
+    '#e9c46a',  // 1 AutoEQ
+    '#f4a261',  // 2 Saturator
+    '#e76f51',  // 3 Compressor
+    '#5fa8d3',  // 4 OutputLeveler
+    '#a8dadc',  // 5 SpatialD
+  ];
+  const STAGE_NAMES = ['LEVELER', 'AUTO EQ', 'SAT', 'COMP', 'OUT LEV', 'SPATIAL'];
+
+  const DB_MIN = -90, DB_MAX = 0;
+
+  function freqToX(f, W) {
+    return (Math.log10(f / FLO) / Math.log10(FHI / FLO)) * W;
+  }
+  function dbToY(db, H) {
+    return H - ((Math.max(DB_MIN, Math.min(DB_MAX, db)) - DB_MIN) / (DB_MAX - DB_MIN)) * H;
+  }
+
+  function drawSpectrum(data) {
+    const canvas = document.getElementById('spectrum-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+
+    // Background.
+    ctx.fillStyle = '#0a0a0a';
+    ctx.fillRect(0, 0, W, H);
+
+    // Grid lines.
+    ctx.strokeStyle = '#1e1e1e';
+    ctx.lineWidth = 1;
+    // Horizontal dB lines.
+    [-20, -40, -60, -80].forEach(db => {
+      const y = Math.round(dbToY(db, H)) + 0.5;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    });
+    // Vertical frequency lines.
+    [50, 100, 200, 500, 1000, 2000, 5000, 10000].forEach(f => {
+      const x = Math.round(freqToX(f, W)) + 0.5;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    });
+
+    // Frequency labels.
+    ctx.fillStyle = '#333';
+    ctx.font = '8px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    [[100,'100'], [1000,'1k'], [10000,'10k']].forEach(([f, label]) => {
+      ctx.fillText(label, freqToX(f, W), H - 2);
+    });
+
+    // dB labels.
+    ctx.textAlign = 'left';
+    [-20, -40, -60].forEach(db => {
+      ctx.fillText(db + 'dB', 2, dbToY(db, H) - 2);
+    });
+
+    if (!data) return;
+
+    const order  = data.order;   // order[chain_pos] = stageID
+    const dbData = data.db;      // dbData[chain_pos][bin]
+
+    // Draw each stage curve, back-to-front (last stage on top).
+    for (let pos = 0; pos < dbData.length; ++pos) {
+      const stageId = order[pos];
+      const color   = STAGE_COLORS[stageId] || '#888';
+      const curve   = dbData[pos];
+
+      ctx.beginPath();
+      ctx.strokeStyle = color;
+      ctx.lineWidth   = 1.5;
+      ctx.globalAlpha = 0.85;
+      let started = false;
+      for (let b = 0; b < KDISP; ++b) {
+        const x = freqToX(dispFreqs[b], W);
+        const y = dbToY(curve[b], H);
+        if (!started) { ctx.moveTo(x, y); started = true; }
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    // Legend (top-right, chain order).
+    ctx.font = '8px -apple-system, sans-serif';
+    ctx.textAlign = 'right';
+    for (let pos = 0; pos < order.length; ++pos) {
+      const sid = order[pos];
+      ctx.fillStyle = STAGE_COLORS[sid] || '#888';
+      ctx.fillText(STAGE_NAMES[sid] || ('S' + sid), W - 3, 10 + pos * 10);
+    }
+  }
+
+  // Called with no data on init to draw the empty grid.
+  drawSpectrum(null);
+
+  window.toneSpectrum = function(data) {
+    drawSpectrum(data);
+  };
+})();
+
+window.toneSetParam = function(id, value) {
+  paramValues[id] = value;
+
+  if (id === 'TRM') {
+    refreshTrimKnob();
+    return;
+  }
+
+  // Refresh knob or toggle in the control surface
+  if (document.querySelector(`.knob-wrap[data-id="${id}"]`)) {
+    refreshKnob(id);
+  } else if (document.querySelector(`.toggle-wrap[data-id="${id}"]`)) {
+    refreshToggle(id);
+  }
+
+  refreshChain();
+};
+</script>
+</body>
+</html>

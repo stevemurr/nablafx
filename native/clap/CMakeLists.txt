@@ -45,11 +45,16 @@ target_link_libraries(nablafx_clap PRIVATE
 # are header-only so they don't appear in the source list.
 add_library(tone_clap MODULE
     src/tone_plugin.cpp
+    src/tone_gui.mm
     src/composite_meta.cpp
     src/meta.cpp
     src/lufs_leveler.cpp
     src/true_peak_ceiling.cpp
     src/param_id.cpp
+)
+
+set_source_files_properties(src/tone_gui.mm PROPERTIES
+    COMPILE_FLAGS "-fobjc-arc"
 )
 
 target_include_directories(tone_clap PRIVATE
@@ -61,6 +66,8 @@ target_include_directories(tone_clap PRIVATE
 target_link_libraries(tone_clap PRIVATE
     ${ONNXRUNTIME_LIBRARY}
     "-framework CoreFoundation"
+    "-framework Cocoa"
+    "-framework WebKit"
 )
 
 # Install the onnxruntime dylib next to ours and make each plugin find it
