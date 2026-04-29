@@ -1,8 +1,8 @@
 // tone_meta.json — top-level meta for the composite TONE plugin.
 //
 // Written on the Python side by ``nablafx.export.composite``; read here on
-// module load to wire the host-exposed AMT/TRM knobs to per-stage
-// parameters and to locate the three sub-bundles.
+// module load to wire the host-exposed AMT/TRM/CLS knobs to per-stage
+// parameters and to locate the saturator + la2a + per-class auto-EQ bundles.
 
 #pragma once
 
@@ -41,17 +41,28 @@ struct CompositeCeilingCfg {
     float release_ms   = 50.0f;
 };
 
+// Multi-class auto-EQ. Each entry in ``classes`` names the sub-bundle dir
+// under .clap/Contents/Resources. ``class_order`` is the canonical index
+// order — the integer-valued CLS control selects classes via this index.
+struct CompositeAutoEqClasses {
+    std::string                                  default_class;
+    std::vector<std::string>                     class_order;
+    std::unordered_map<std::string, std::string> classes;  // class → bundle dir
+};
+
 struct CompositeMeta {
     int                                            schema_version{};
     std::string                                    effect_name;
     std::string                                    model_id;
     int                                            sample_rate{};
     int                                            channels{};
-    // Role name → directory name (relative to .clap/Contents/Resources/).
+    // Single-instance sub-bundles (saturator, la2a). Role → directory name
+    // relative to .clap/Contents/Resources/.
     std::unordered_map<std::string, std::string>   sub_bundles;
-    // Host-exposed knobs, keyed by id ("AMT", "TRM"). Stored as the same
-    // ControlSpec used by the per-stage plugins so existing param-id helpers
-    // apply unchanged.
+    // Multi-class auto-EQ — one bundle per instrument-class preset.
+    CompositeAutoEqClasses                         auto_eq;
+    // Host-exposed knobs. Stored as the same ControlSpec used by the per-stage
+    // plugins so existing param-id helpers apply unchanged.
     std::vector<ControlSpec>                       controls;
 
     CompositeAmountSat                             amt_sat;

@@ -1,3 +1,7 @@
 _target_: lightning.pytorch.callbacks.EarlyStopping
 monitor: loss/val/tot
 patience: 50
+# loss/val/tot is logged on_epoch=True during validation, which runs AFTER
+# on_train_epoch_end. Without this the callback fires at train epoch end and
+# crashes because the val metric hasn't been populated yet.
+check_on_train_epoch_end: false

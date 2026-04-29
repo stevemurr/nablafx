@@ -20,10 +20,10 @@ CompositeMeta load_composite_meta(const std::string& path) {
 
     CompositeMeta m;
     m.schema_version = j.value("schema_version", 0);
-    if (m.schema_version != 1) {
+    if (m.schema_version != 2) {
         std::ostringstream oss;
         oss << "unsupported tone_meta schema_version " << m.schema_version
-            << " (this build understands version 1)";
+            << " (this build understands version 2)";
         throw std::runtime_error(oss.str());
     }
 
@@ -34,6 +34,33 @@ CompositeMeta load_composite_meta(const std::string& path) {
 
     for (const auto& [role, dir] : j.at("sub_bundles").items()) {
         m.sub_bundles[role] = dir.get<std::string>();
+    }
+
+    // Multi-class auto-EQ.
+    {
+        const auto& aeq = j.at("auto_eq");
+        m.auto_eq.default_class = aeq.at("default_class").get<std::string>();
+        for (const auto& c : aeq.at("class_order")) {
+            m.auto_eq.class_order.push_back(c.get<std::string>());
+        }
+        for (const auto& [cls, dir] : aeq.at("classes").items()) {
+            m.auto_eq.classes[cls] = dir.get<std::string>();
+        }
+        if (m.auto_eq.class_order.empty()) {
+            throw std::runtime_error("tone_meta.auto_eq.class_order is empty");
+        }
+        if (m.auto_eq.classes.find(m.auto_eq.default_class) == m.auto_eq.classes.end()) {
+            throw std::runtime_error(
+                "tone_meta.auto_eq.default_class '" + m.auto_eq.default_class
+                + "' not present in classes map");
+        }
+        for (const auto& cls : m.auto_eq.class_order) {
+            if (m.auto_eq.classes.find(cls) == m.auto_eq.classes.end()) {
+                throw std::runtime_error(
+                    "tone_meta.auto_eq.class_order entry '" + cls
+                    + "' not present in classes map");
+            }
+        }
     }
 
     for (const auto& [id, c] : j.at("controls").items()) {

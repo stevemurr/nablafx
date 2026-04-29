@@ -30,6 +30,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -220,7 +221,10 @@ private:
 
 struct ModuleState {
     CompositeMeta              tone_meta;
-    PluginMeta                 autoeq_meta;
+    // One PluginMeta per auto-EQ class. Indexed by tone_meta.auto_eq.class_order;
+    // the lookup map mirrors the same data keyed by class name for convenience.
+    std::vector<PluginMeta>                              autoeq_metas;
+    std::unordered_map<std::string, std::size_t>         autoeq_class_index;
     PluginMeta                 sat_meta;
     PluginMeta                 la2a_meta;
     std::string                bundle_dir;            // .../TONE.clap/Contents
@@ -232,8 +236,12 @@ struct ModuleState {
     std::unique_ptr<Ort::Env>  ort_env;
     // Pulled out of sat_meta once at load.
     RationalAParams            sat_rational;
-    // Pulled out of autoeq_meta once at load.
+    // Pulled out of autoeq_metas[0] once at load. All classes share the same
+    // PEQ DSP layout (validated at compose time), so a single DSP block is
+    // enough to drive the downstream filter cascade for whichever class is
+    // currently active.
     ParametricEq5BandParams    autoeq_eq;
+    int                        autoeq_default_idx{0};
 };
 
 static ModuleState* g_state = nullptr;
@@ -460,7 +468,11 @@ private:
 struct ChannelChain {
     // Per-channel stage instances. TruePeakCeiling runs per-channel; the
     // LufsLeveler is shared on Plugin so it can apply linked stereo gain.
-    std::unique_ptr<OrtMiniSession>        autoeq_ort;
+    // One ORT session per auto-EQ class (bass/drums/vocals/other/full_mix);
+    // CLS picks which one is active. Inactive sessions hold zeroed state
+    // so a class switch starts the LSTM from a neutral init and avoids
+    // bleeding stale activations from a different class's signal.
+    std::vector<std::unique_ptr<OrtMiniSession>> autoeq_ort_per_class;
     ParametricEq5Band                      autoeq_eq;
     RationalA                              saturator;
     // 1st-order HPF for bass-preserved saturation (bilinear transform).
@@ -499,6 +511,12 @@ struct Plugin {
 
     // Processor ordering — driven by GUI drag-and-drop.
     std::array<int, kNumStages> processor_order{0, 1, 2, 3, 4, 5};
+
+    // Active auto-EQ class index (into ModuleState::autoeq_metas /
+    // tone_meta.auto_eq.class_order). Updated from the audio thread when the
+    // CLS control changes, so the AutoEQ stage routes through
+    // chains[ch].autoeq_ort_per_class[active_autoeq_cls].
+    int active_autoeq_cls{0};
 
     // GUI → audio-thread param queue (try_lock on audio thread, never blocks).
     std::mutex                       param_mutex;
@@ -576,12 +594,39 @@ static bool params_get_value(const clap_plugin_t* p, clap_id id, double* value) 
     return false;
 }
 
-static bool params_value_to_text(const clap_plugin_t*, clap_id, double value, char* out, uint32_t out_size) {
+static bool params_value_to_text(const clap_plugin_t* p, clap_id id, double value, char* out, uint32_t out_size) {
+    auto* plug = static_cast<Plugin*>(p->plugin_data);
+    // CLS displays the class name instead of the integer index.
+    for (size_t i = 0; i < plug->meta->controls.size(); ++i) {
+        if (param_id_for(plug->meta->effect_name, plug->meta->controls[i].id) == id
+            && plug->meta->controls[i].id == "CLS") {
+            const auto& classes = g_state->tone_meta.auto_eq.class_order;
+            int idx = std::clamp(static_cast<int>(std::lround(value)),
+                                 0, static_cast<int>(classes.size()) - 1);
+            std::snprintf(out, out_size, "%s", classes[idx].c_str());
+            return true;
+        }
+    }
     std::snprintf(out, out_size, "%.3f", value);
     return true;
 }
 
-static bool params_text_to_value(const clap_plugin_t*, clap_id, const char* text, double* out) {
+static bool params_text_to_value(const clap_plugin_t* p, clap_id id, const char* text, double* out) {
+    auto* plug = static_cast<Plugin*>(p->plugin_data);
+    // CLS accepts a class name and converts it to the canonical index.
+    for (size_t i = 0; i < plug->meta->controls.size(); ++i) {
+        if (param_id_for(plug->meta->effect_name, plug->meta->controls[i].id) == id
+            && plug->meta->controls[i].id == "CLS") {
+            const auto& classes = g_state->tone_meta.auto_eq.class_order;
+            for (size_t k = 0; k < classes.size(); ++k) {
+                if (classes[k] == text) {
+                    *out = static_cast<double>(k);
+                    return true;
+                }
+            }
+            // Fall through to numeric parse if the text isn't a class name.
+        }
+    }
     char* end = nullptr;
     double v = std::strtod(text, &end);
     if (end == text) return false;
@@ -697,14 +742,34 @@ static bool plugin_activate(const clap_plugin_t* p, double sample_rate,
 
     plug->dimension_d.reset(sample_rate, /*rate_hz=*/0.8, /*depth_norm=*/0.5);
 
+    // Seed active class from CLS control; clamp to a valid class index.
+    {
+        const auto& classes = g_state->tone_meta.auto_eq.class_order;
+        int cls_idx = g_state->autoeq_default_idx;
+        for (size_t i = 0; i < plug->meta->controls.size(); ++i) {
+            if (plug->meta->controls[i].id == "CLS") {
+                cls_idx = static_cast<int>(std::lround(plug->control_values[i]));
+                break;
+            }
+        }
+        cls_idx = std::clamp(cls_idx, 0, static_cast<int>(classes.size()) - 1);
+        plug->active_autoeq_cls = cls_idx;
+    }
+
     plug->chains.clear();
     plug->chains.resize(plug->channels);
     for (auto& ch : plug->chains) {
-        ch.autoeq_ort = std::make_unique<OrtMiniSession>(
-            *g_state->ort_env,
-            g_state->resources_dir + "/" + g_state->tone_meta.sub_bundles.at("auto_eq")
-                + "/model.onnx",
-            g_state->autoeq_meta);
+        const auto& classes = g_state->tone_meta.auto_eq.class_order;
+        ch.autoeq_ort_per_class.clear();
+        ch.autoeq_ort_per_class.reserve(classes.size());
+        for (size_t i = 0; i < classes.size(); ++i) {
+            const std::string& cls = classes[i];
+            const std::string& dir = g_state->tone_meta.auto_eq.classes.at(cls);
+            ch.autoeq_ort_per_class.push_back(std::make_unique<OrtMiniSession>(
+                *g_state->ort_env,
+                g_state->resources_dir + "/" + dir + "/model.onnx",
+                g_state->autoeq_metas[i]));
+        }
         ch.autoeq_eq.reset(g_state->autoeq_eq);
         ch.saturator.reset(g_state->sat_rational.numerator,
                            g_state->sat_rational.denominator);
@@ -750,7 +815,9 @@ static void plugin_reset(const clap_plugin_t* p) {
     plug->out_leveler.reset(plug->sample_rate, g_state->tone_meta.leveler.target_lufs);
     plug->dimension_d.reset(plug->sample_rate, /*rate_hz=*/0.8, /*depth_norm=*/0.5);
     for (auto& ch : plug->chains) {
-        if (ch.autoeq_ort) ch.autoeq_ort->reset_state();
+        for (auto& s : ch.autoeq_ort_per_class) {
+            if (s) s->reset_state();
+        }
         if (ch.la2a_ort)   ch.la2a_ort->reset_state();
         ch.ceiling.reset(plug->sample_rate);
         ch.in_fill   = 0;
@@ -771,6 +838,7 @@ struct AmountSnapshot {
     float lvl_wet, lvl_target_lufs;
     float out_lvl_wet, out_lvl_target_lufs;
     float autoeq_wet_mix;
+    int   autoeq_cls_idx;
     float eq_band_offsets[5];
     float sat_pre_db, sat_post_db, sat_wet_mix, sat_hpf_hz, sat_thresh_lin, sat_bias;
     float la2a_wet, la2a_pr_norm, la2a_comp_or_limit;
@@ -783,6 +851,7 @@ AmountSnapshot resolve_amount_(const Plugin& plug) {
     float cl=1.f,cmp=50.f,eq=0.5f,trm_db=0.f;
     float olv=1.f,olt=-14.f,spw=0.f,spr=0.8f,spd=0.5f;
     float eq_off[5]={};
+    int   cls_idx=plug.active_autoeq_cls;
     for (size_t i=0;i<plug.meta->controls.size();++i) {
         const auto& c=plug.meta->controls[i];
         float v=std::clamp(plug.control_values[i],c.min,c.max);
@@ -792,6 +861,7 @@ AmountSnapshot resolve_amount_(const Plugin& plug) {
         else if(c.id=="STH") sth=v; else if(c.id=="SBS") sbs=v;
         else if(c.id=="C_L") cl=v;
         else if(c.id=="CMP") cmp=v; else if(c.id=="EQ")  eq=v;
+        else if(c.id=="CLS") cls_idx=static_cast<int>(std::lround(v));
         else if(c.id=="EQ0") eq_off[0]=v; else if(c.id=="EQ1") eq_off[1]=v;
         else if(c.id=="EQ2") eq_off[2]=v; else if(c.id=="EQ3") eq_off[3]=v;
         else if(c.id=="EQ4") eq_off[4]=v; else if(c.id=="OLV") olv=v;
@@ -806,6 +876,8 @@ AmountSnapshot resolve_amount_(const Plugin& plug) {
     s.sat_pre_db=sdr; s.sat_post_db=svo; s.sat_wet_mix=smx; s.sat_hpf_hz=shf;
     s.sat_thresh_lin=std::pow(10.f, sth/20.f); s.sat_bias=sbs;
     s.autoeq_wet_mix=eq*g_state->tone_meta.amt_autoeq.wet_mix_max;
+    const int n_cls = static_cast<int>(g_state->tone_meta.auto_eq.class_order.size());
+    s.autoeq_cls_idx = std::clamp(cls_idx, 0, n_cls > 0 ? n_cls - 1 : 0);
     for(int b=0;b<5;++b) s.eq_band_offsets[b]=eq_off[b];
     s.la2a_wet=cmp/100.f; s.la2a_pr_norm=cmp/100.f;
     s.la2a_comp_or_limit=cl;
@@ -857,12 +929,24 @@ void flush_chain_block_(Plugin& plug,
         }
 
         case StageID::AutoEQ: {
+            // If CLS changed since the previous block, swap the active class
+            // and zero out the new session's LSTM state so we don't carry over
+            // hidden activations conditioned on a different signal class.
+            if (amt.autoeq_cls_idx != plug.active_autoeq_cls) {
+                plug.active_autoeq_cls = amt.autoeq_cls_idx;
+                for (auto& chan : plug.chains) {
+                    auto& s = chan.autoeq_ort_per_class[plug.active_autoeq_cls];
+                    if (s) s->reset_state();
+                }
+            }
+            const int cls = plug.active_autoeq_cls;
             float* ch_buf[2] = {work_l, work_r};
             for (uint32_t ch=0; ch<n_ch; ++ch) {
                 float* blk = ch_buf[ch];
                 std::array<float,15> eq_params{};
-                plug.chains[ch].autoeq_ort->run_controller(blk,kBlockSize,eq_params.data(),15);
-                plug.chains[ch].autoeq_ort->swap_state();
+                auto& sess = plug.chains[ch].autoeq_ort_per_class[cls];
+                sess->run_controller(blk,kBlockSize,eq_params.data(),15);
+                sess->swap_state();
                 for (int b=0;b<5;++b) {
                     if (amt.eq_band_offsets[b]==0.f) continue;
                     float& p=eq_params[kGainCh[b]];
@@ -1143,15 +1227,30 @@ static void gui_send_full_state_(Plugin* plug) {
     if (!plug->gui_state) return;
     const size_t n = plug->meta->controls.size();
     std::vector<ToneParamInfo> params(n);
+    // Cache class-name pointers for the CLS enum picker. The vector itself
+    // backs the const char* array we pass in ToneParamInfo::enum_options;
+    // both must outlive the tone_gui_send_init() call (it copies the strings
+    // into the JS payload synchronously on the main thread or buffers them).
+    const auto& classes = g_state->tone_meta.auto_eq.class_order;
+    std::vector<const char*> class_ptrs;
+    class_ptrs.reserve(classes.size());
+    for (const auto& s : classes) class_ptrs.push_back(s.c_str());
+
     for (size_t i = 0; i < n; ++i) {
         const auto& c = plug->meta->controls[i];
-        params[i].id            = c.id.c_str();
-        params[i].name          = c.name.c_str();
-        params[i].min           = c.min;
-        params[i].max           = c.max;
-        params[i].def           = c.def;
-        params[i].unit          = c.unit.c_str();
-        params[i].current_value = plug->control_values[i];
+        params[i].id             = c.id.c_str();
+        params[i].name           = c.name.c_str();
+        params[i].min            = c.min;
+        params[i].max            = c.max;
+        params[i].def            = c.def;
+        params[i].unit           = c.unit.c_str();
+        params[i].current_value  = plug->control_values[i];
+        params[i].enum_options   = nullptr;
+        params[i].n_enum_options = 0;
+        if (c.id == "CLS" && !class_ptrs.empty()) {
+            params[i].enum_options   = class_ptrs.data();
+            params[i].n_enum_options = static_cast<int>(class_ptrs.size());
+        }
     }
     tone_gui_send_init(plug->gui_state,
                        params.data(), static_cast<int>(n),
@@ -1307,9 +1406,6 @@ static bool entry_init(const char* /*plugin_path*/) {
         st->resources_dir = st->bundle_dir + "/Resources";
 
         st->tone_meta = load_composite_meta(st->resources_dir + "/tone_meta.json");
-        st->autoeq_meta = load_meta(st->resources_dir + "/" +
-                                    st->tone_meta.sub_bundles.at("auto_eq")
-                                    + "/plugin_meta.json");
         st->sat_meta    = load_meta(st->resources_dir + "/" +
                                     st->tone_meta.sub_bundles.at("saturator")
                                     + "/plugin_meta.json");
@@ -1317,15 +1413,37 @@ static bool entry_init(const char* /*plugin_path*/) {
                                     st->tone_meta.sub_bundles.at("la2a")
                                     + "/plugin_meta.json");
 
+        // Load every auto-EQ class meta in the canonical class_order. All
+        // classes must share the same PEQ DSP block geometry (frozen freqs +
+        // identical ranges + identical channel layout), since the runtime
+        // ParametricEq5Band downstream is shared and only the controller ONNX
+        // is swapped on a class change.
+        st->autoeq_metas.clear();
+        st->autoeq_class_index.clear();
+        st->autoeq_metas.reserve(st->tone_meta.auto_eq.class_order.size());
+        for (const auto& cls : st->tone_meta.auto_eq.class_order) {
+            const std::string& dir = st->tone_meta.auto_eq.classes.at(cls);
+            PluginMeta m = load_meta(st->resources_dir + "/" + dir + "/plugin_meta.json");
+            if (m.dsp_blocks.empty()) {
+                throw std::runtime_error(
+                    "auto_eq sub-bundle '" + dir + "' has no dsp_blocks");
+            }
+            st->autoeq_class_index[cls] = st->autoeq_metas.size();
+            st->autoeq_metas.push_back(std::move(m));
+        }
+        if (st->autoeq_metas.empty()) {
+            throw std::runtime_error("tone_meta.auto_eq is empty");
+        }
+
         // Pull the DSP block payloads we need at chain construction time.
         if (st->sat_meta.dsp_blocks.empty()) {
             throw std::runtime_error("saturator sub-bundle has no dsp_blocks");
         }
         st->sat_rational = std::get<RationalAParams>(st->sat_meta.dsp_blocks[0].params);
-        if (st->autoeq_meta.dsp_blocks.empty()) {
-            throw std::runtime_error("auto_eq sub-bundle has no dsp_blocks");
-        }
-        st->autoeq_eq = std::get<ParametricEq5BandParams>(st->autoeq_meta.dsp_blocks[0].params);
+        st->autoeq_eq = std::get<ParametricEq5BandParams>(
+            st->autoeq_metas[0].dsp_blocks[0].params);
+        st->autoeq_default_idx = static_cast<int>(
+            st->autoeq_class_index.at(st->tone_meta.auto_eq.default_class));
 
         st->ort_env = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "nablafx-tone");
         populate_descriptor_(*st);

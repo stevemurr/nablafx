@@ -18,7 +18,7 @@ import torch
 from ..processors.ddsp import ParametricEQ
 from ..processors.dsp import biquad, fft_sosfreqz, sosfilt_via_fsm
 
-__all__ = ["BrownNoiseTargetEQ", "SaturatorCurveSynth"]
+__all__ = ["BrownNoiseTargetEQ", "EmpiricalTargetEQ", "SaturatorCurveSynth"]
 
 
 # TONE stage-2 frozen band centers (Hz). These match the ParametricEQ defaults
@@ -211,6 +211,79 @@ class BrownNoiseTargetEQ(torch.nn.Module):
         gains_db = self._solve_gains(x)
         y = self._apply_eq(x, gains_db)
         return y, gains_db
+
+
+class EmpiricalTargetEQ(BrownNoiseTargetEQ):
+    """Auto-EQ target driven by an empirical per-class reference spectrum.
+
+    Identical solver and band layout as `BrownNoiseTargetEQ`, but the target
+    log-mel curve is loaded from a `.npz` produced by
+    `scripts/extract_class_targets.py` (median-of-track-avgs in mel space).
+
+    The stored reference is zero-mean (spectral *shape*); per-clip we add the
+    input clip's own mean log-power so the target has matched overall energy,
+    just like the brown-noise variant does.
+
+    Expects the reference .npz to use the same `sample_rate`, `n_fft`, and
+    `n_mels` as this transform — raises if they disagree, since the mel band
+    centers must line up with the solver's internal `_mel_band_log_power`.
+    """
+
+    def __init__(
+        self,
+        reference_path: str,
+        sample_rate: float,
+        min_gain_db: float = -9.0,
+        max_gain_db: float = 9.0,
+        n_fft: int = 2048,
+        n_mels: int = 64,
+    ):
+        super().__init__(
+            sample_rate=sample_rate,
+            min_gain_db=min_gain_db,
+            max_gain_db=max_gain_db,
+            n_fft=n_fft,
+            n_mels=n_mels,
+        )
+        import numpy as np
+        ref = np.load(reference_path, allow_pickle=False)
+        ref_sr = int(ref["sample_rate"])
+        ref_n_fft = int(ref["n_fft"])
+        ref_n_mels = int(ref["n_mels"])
+        if (ref_sr, ref_n_fft, ref_n_mels) != (int(sample_rate), n_fft, n_mels):
+            raise ValueError(
+                f"reference {reference_path} was extracted with "
+                f"sr={ref_sr}, n_fft={ref_n_fft}, n_mels={ref_n_mels}; "
+                f"transform configured with sr={int(sample_rate)}, "
+                f"n_fft={n_fft}, n_mels={n_mels}"
+            )
+        target = torch.as_tensor(ref["target_log_power_db"], dtype=torch.float32)
+        # Re-zero-mean defensively so the per-clip mean-matching below is exact.
+        target = target - target.mean()
+        self.register_buffer("target_shape_db", target)
+        self.class_name = str(ref["class_name"]) if "class_name" in ref.files else ""
+        self.reference_path = reference_path
+
+    @torch.no_grad()
+    def _solve_gains(self, x: torch.Tensor) -> torch.Tensor:
+        mel_hz, log_power = _mel_band_log_power(
+            x, self.sample_rate, n_fft=self.n_fft, n_mels=self.n_mels
+        )
+        ref_db = log_power.mean(dim=-1)  # [bs]
+        # target_db[b, m] = ref_db[b] + target_shape_db[m]
+        target_db = ref_db.unsqueeze(-1) + self.target_shape_db.to(
+            device=log_power.device, dtype=log_power.dtype
+        ).unsqueeze(0)
+        delta_db = target_db - log_power
+
+        A = self._build_design_matrix(mel_hz)
+        At = A.T
+        AtA = At @ A + 1e-2 * torch.eye(
+            len(self.band_centers), device=x.device, dtype=x.dtype
+        )
+        rhs = (At @ delta_db.T).T
+        g = torch.linalg.solve(AtA, rhs.unsqueeze(-1)).squeeze(-1)
+        return g.clamp(self.min_gain_db, self.max_gain_db)
 
 
 class SaturatorCurveSynth(torch.nn.Module):

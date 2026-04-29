@@ -19,9 +19,17 @@ class GreyBoxSystem(BaseSystem):
         lr: float = 1e-4,
         log_media_every_n_steps: int = 10000,
         use_callbacks: bool = False,
+        lr_schedule: str = "plateau",
+        lr_warmup_steps: int = 200,
+        lr_warmup_start_factor: float = 0.01,
+        lr_min: float = 1e-4,
     ):
         super().__init__(loss, lr, log_media_every_n_steps, use_callbacks)
         self.model = model
+        self.lr_schedule = lr_schedule
+        self.lr_warmup_steps = lr_warmup_steps
+        self.lr_warmup_start_factor = lr_warmup_start_factor
+        self.lr_min = lr_min
 
     def common_step(
         self,
@@ -215,6 +223,25 @@ class GreyBoxSystem(BaseSystem):
             betas=(0.9, 0.999),
             eps=1e-8,
         )
+
+        if self.lr_schedule == "cosine_warmup":
+            total_steps = max(1, int(self.trainer.max_steps))
+            warmup_steps = max(1, min(int(self.lr_warmup_steps), total_steps - 1))
+            warmup = torch.optim.lr_scheduler.LinearLR(
+                optimizer,
+                start_factor=self.lr_warmup_start_factor,
+                end_factor=1.0,
+                total_iters=warmup_steps,
+            )
+            cosine = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=max(1, total_steps - warmup_steps),
+                eta_min=self.lr_min,
+            )
+            scheduler = torch.optim.lr_scheduler.SequentialLR(
+                optimizer, schedulers=[warmup, cosine], milestones=[warmup_steps]
+            )
+            return [optimizer], [{"scheduler": scheduler, "interval": "step", "frequency": 1}]
 
         # Scheduler is stepped manually in on_validation_epoch_end so it tracks
         # val frequency, not epoch frequency. Returning the scheduler in

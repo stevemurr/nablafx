@@ -356,6 +356,15 @@ void tone_gui_send_init(
                  (double)p.min, (double)p.max, (double)p.def);
         js += buf;
         js += json_escape(p.unit);
+
+        if (p.enum_options && p.n_enum_options > 0) {
+            js += ",\"enumOptions\":[";
+            for (int k = 0; k < p.n_enum_options; ++k) {
+                if (k) js += ',';
+                js += json_escape(p.enum_options[k] ? p.enum_options[k] : "");
+            }
+            js += ']';
+        }
         js += '}';
     }
 

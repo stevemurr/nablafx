@@ -10,15 +10,22 @@ extern "C" {
 // Opaque handle – defined only inside tone_gui.mm
 typedef struct ToneGUIState ToneGUIState;
 
-// Describes one parameter for the initial handshake
+// Describes one parameter for the initial handshake.
+//
+// `enum_options` lists discrete option labels (one per integer value from
+// `min` to `max`) for enum-style controls, in the order they should appear in
+// the picker. NULL or `n_enum_options == 0` means the control is a continuous
+// knob/toggle. Used by the AUTO-EQ class picker (CLS).
 typedef struct {
-    const char* id;
-    const char* name;
-    float       min;
-    float       max;
-    float       def;
-    const char* unit;
-    float       current_value;
+    const char*         id;
+    const char*         name;
+    float               min;
+    float               max;
+    float               def;
+    const char*         unit;
+    float               current_value;
+    const char* const*  enum_options;
+    int                 n_enum_options;
 } ToneParamInfo;
 
 // ---------------------------------------------------------------------------

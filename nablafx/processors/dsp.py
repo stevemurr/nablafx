@@ -52,7 +52,10 @@ def fft_freqz(b: torch.Tensor, a: torch.Tensor, n_fft: int = 512) -> torch.Tenso
     """
     B = torch.fft.rfft(b, n_fft)
     A = torch.fft.rfft(a, n_fft)
-    H = B / A
+    # Guard against zero (or near-zero) denominator bins — biquad coefficient
+    # combinations from the controller can put `A` very close to zero at some
+    # bins, sending H -> inf and NaNing downstream losses.
+    H = B / (A + 1e-8)
     return H
 
 

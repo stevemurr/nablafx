@@ -12,6 +12,7 @@ from __future__ import annotations
 import time
 
 import lightning.pytorch as pl
+import torch
 
 
 class ConsoleProgressCallback(pl.Callback):
@@ -44,9 +45,21 @@ class ConsoleProgressCallback(pl.Callback):
         step = trainer.global_step
         if step == 0 or step % self.every_n_steps != 0:
             return
-        metrics = trainer.logged_metrics
-        loss = metrics.get("loss/train/tot")
-        loss_val = float(loss) if loss is not None else float("nan")
+        # `outputs` is whatever training_step returned (the loss tensor for
+        # most LightningModules). Prefer that over `trainer.logged_metrics`,
+        # which only populates loss/train/tot at epoch end (on_step=False).
+        # Reading from logged_metrics during the epoch returns NaN as a
+        # default and makes healthy training look broken.
+        loss_val = float("nan")
+        if isinstance(outputs, torch.Tensor):
+            loss_val = float(outputs.detach())
+        elif isinstance(outputs, dict) and "loss" in outputs:
+            loss_val = float(outputs["loss"].detach())
+        else:
+            metrics = trainer.logged_metrics
+            loss = metrics.get("loss/train/tot")
+            if loss is not None:
+                loss_val = float(loss)
         lr = trainer.optimizers[0].param_groups[0]["lr"]
         now = time.monotonic()
         steps_per_sec = self.every_n_steps / max(1e-6, now - self._last_print_time)

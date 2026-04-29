@@ -58,9 +58,28 @@ else
         echo "error: $STAGING is missing tone_meta.json" >&2
         exit 1
     fi
-    for sub in auto_eq saturator la2a; do
+    for sub in saturator la2a; do
         if [ ! -d "$STAGING/$sub" ]; then
             echo "error: $STAGING is missing the $sub/ sub-bundle" >&2
+            exit 1
+        fi
+    done
+    # auto_eq is now multi-class: one auto_eq_<class>/ dir per preset.
+    # tone_meta.json's auto_eq.classes map names which dirs to copy.
+    AUTOEQ_DIRS=$(/usr/bin/env python3 - "$STAGING/tone_meta.json" <<'PY'
+import json, sys
+m = json.load(open(sys.argv[1]))
+classes = m.get("auto_eq", {}).get("classes") or {}
+print(" ".join(sorted(set(classes.values()))))
+PY
+)
+    if [ -z "${AUTOEQ_DIRS}" ]; then
+        echo "error: tone_meta.json has no auto_eq.classes map" >&2
+        exit 1
+    fi
+    for dir in $AUTOEQ_DIRS; do
+        if [ ! -d "$STAGING/$dir" ]; then
+            echo "error: $STAGING is missing auto_eq sub-bundle $dir/" >&2
             exit 1
         fi
     done
@@ -123,8 +142,11 @@ if [ "$MODE" = "single" ]; then
     cp "$STAGING/plugin_meta.json"  "$OUT/Contents/Resources/"
 else
     cp "$STAGING/tone_meta.json"    "$OUT/Contents/Resources/"
-    for sub in auto_eq saturator la2a; do
+    for sub in saturator la2a; do
         cp -R "$STAGING/$sub" "$OUT/Contents/Resources/"
+    done
+    for dir in $AUTOEQ_DIRS; do
+        cp -R "$STAGING/$dir" "$OUT/Contents/Resources/"
     done
     # Copy the WebUI so the plugin can load it at runtime.
     cp -R "$HERE/ui" "$OUT/Contents/Resources/"

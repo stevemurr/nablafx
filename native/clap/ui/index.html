@@ -223,6 +223,50 @@
     height: 98px;
   }
 
+  /* ── Enum picker (e.g. AUTO EQ class) ────────────────────── */
+  .enum-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 6px;
+    min-width: 96px;
+  }
+  .enum-select {
+    appearance: none;
+    -webkit-appearance: none;
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 22px 6px 10px;
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--dim) 50%),
+      linear-gradient(135deg, var(--dim) 50%, transparent 50%);
+    background-position:
+      calc(100% - 12px) 50%,
+      calc(100% - 7px) 50%;
+    background-size: 5px 5px;
+    background-repeat: no-repeat;
+    width: 100%;
+  }
+  .enum-select:hover { border-color: var(--accent); }
+  .enum-select:focus {
+    outline: none;
+    border-color: var(--accent);
+    background-color: #1a2e2c;
+  }
+  .enum-label {
+    font-size: 9px;
+    color: var(--dim);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
   /* ── Layout shell ────────────────────────────────────────── */
   #app {
     display: flex;
@@ -258,7 +302,7 @@
 
 const PROCESSORS = [
   { id: 0, name: 'IN LEVEL',  params: ['LVL', 'LVT'],              wetParams: ['LVL'] },
-  { id: 1, name: 'AUTO EQ',   params: ['EQ', 'EQ0','EQ1','EQ2','EQ3','EQ4'], wetParams: ['EQ'] },
+  { id: 1, name: 'AUTO EQ',   params: ['CLS', 'EQ', 'EQ0','EQ1','EQ2','EQ3','EQ4'], wetParams: ['EQ'] },
   { id: 2, name: 'SATURATOR', params: ['SDR', 'SVO', 'SMX', 'SHF', 'STH', 'SBS'], wetParams: ['SMX'] },
   { id: 3, name: 'COMPRESSOR',params: ['C_L', 'CMP'],              wetParams: ['CMP'] },
   { id: 4, name: 'OUT LEVEL', params: ['OLV', 'OLT'],              wetParams: ['OLV'] },
@@ -280,6 +324,10 @@ function formatValue(id, val) {
   if (!m) return val.toFixed(2);
   const unit = m.unit;
 
+  if (unit === 'enum' && Array.isArray(m.enumOptions) && m.enumOptions.length) {
+    const idx = Math.max(0, Math.min(m.enumOptions.length - 1, Math.round(val)));
+    return prettyEnum(m.enumOptions[idx]);
+  }
   if (unit === 'dB') {
     const s = val >= 0 ? '+' : '';
     return `${s}${val.toFixed(1)} dB`;
@@ -289,6 +337,12 @@ function formatValue(id, val) {
   if (unit === 'switch') return val >= 0.5 ? 'LIMIT' : 'COMP';
   if (unit === '' && m.max <= 1) return `${Math.round(val * 100)}%`;
   return val.toFixed(2);
+}
+
+// Display label for an enum option (e.g. 'full_mix' → 'FULL MIX').
+function prettyEnum(s) {
+  if (typeof s !== 'string') return String(s);
+  return s.replace(/_/g, ' ').toUpperCase();
 }
 
 // ============================================================
@@ -452,12 +506,67 @@ function refreshToggle(id) {
 }
 
 // ============================================================
+// ENUM PICKER (e.g. AUTO EQ class)
+// ============================================================
+
+function buildEnumPicker(id) {
+  const m = paramMeta[id];
+  const wrap = document.createElement('div');
+  wrap.className = 'enum-wrap';
+  wrap.dataset.id = id;
+
+  const cur = paramValues[id] ?? m.def;
+  const idx = Math.max(0, Math.min(m.enumOptions.length - 1, Math.round(cur)));
+
+  const select = document.createElement('select');
+  select.className = 'enum-select';
+  m.enumOptions.forEach((opt, i) => {
+    const option = document.createElement('option');
+    option.value = String(i);
+    option.textContent = prettyEnum(opt);
+    if (i === idx) option.selected = true;
+    select.appendChild(option);
+  });
+  select.addEventListener('change', () => {
+    const v = parseInt(select.value, 10);
+    if (Number.isFinite(v)) {
+      paramValues[id] = v;
+      sendParam(id, v);
+    }
+  });
+
+  const label = document.createElement('div');
+  label.className = 'enum-label';
+  label.textContent = m.name;
+
+  wrap.appendChild(select);
+  wrap.appendChild(label);
+  return wrap;
+}
+
+function refreshEnum(id) {
+  const el = document.querySelector(`.enum-wrap[data-id="${id}"]`);
+  if (!el) return;
+  const m = paramMeta[id];
+  if (!m || !Array.isArray(m.enumOptions)) return;
+  const select = el.querySelector('select.enum-select');
+  if (!select) return;
+  const cur = paramValues[id] ?? m.def;
+  const idx = Math.max(0, Math.min(m.enumOptions.length - 1, Math.round(cur)));
+  if (select.selectedIndex !== idx) select.selectedIndex = idx;
+}
+
+// ============================================================
 // BUILD CONTROL FOR A PARAM
 // ============================================================
 
 function buildControl(id) {
   const m = paramMeta[id];
   if (!m) return null;
+
+  if (m.unit === 'enum' && Array.isArray(m.enumOptions) && m.enumOptions.length) {
+    return buildEnumPicker(id);
+  }
 
   if (id === 'C_L') {
     // Toggle button
@@ -764,11 +873,13 @@ window.toneSetParam = function(id, value) {
     return;
   }
 
-  // Refresh knob or toggle in the control surface
+  // Refresh knob, toggle, or enum picker in the control surface
   if (document.querySelector(`.knob-wrap[data-id="${id}"]`)) {
     refreshKnob(id);
   } else if (document.querySelector(`.toggle-wrap[data-id="${id}"]`)) {
     refreshToggle(id);
+  } else if (document.querySelector(`.enum-wrap[data-id="${id}"]`)) {
+    refreshEnum(id);
   }
 
   refreshChain();
