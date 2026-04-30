@@ -502,6 +502,11 @@ struct ChannelChain {
     // bleeding stale activations from a different class's signal.
     std::vector<std::unique_ptr<OrtMiniSession>> autoeq_ort_per_class;
     ParametricEq5Band                      autoeq_eq;
+    // Peak-hold envelope follower for auto-EQ controller input normalization.
+    // Training normalized peak per ~10 s segment; using a per-128-block peak at
+    // runtime collapsed the LSTM's input distribution. Attack-instant /
+    // decay-slow tracking gives a stable scale across blocks.
+    float                                  autoeq_peak_env{0.f};
     RationalA                              saturator;
     // 1st-order HPF for bass-preserved saturation (bilinear transform).
     float sat_hpf_fc{-1.f};               // cached cutoff; -1 = stale
@@ -536,6 +541,11 @@ struct Plugin {
     bool                 activated{false};
 
     std::vector<float>   control_values;
+
+    // Decay coefficient for the per-channel auto-EQ peak envelope follower.
+    // Computed at activate from sample_rate so the time constant stays at
+    // ~500 ms regardless of host sr. Attack is instantaneous.
+    float                autoeq_env_decay{0.f};
 
     // Processor ordering — driven by GUI drag-and-drop.
     std::array<int, kNumStages> processor_order{0, 1, 2, 3, 4, 5};
@@ -754,6 +764,13 @@ static bool plugin_activate(const clap_plugin_t* p, double sample_rate,
                             uint32_t /*min_frames*/, uint32_t /*max_frames*/) {
     auto* plug = static_cast<Plugin*>(p->plugin_data);
     plug->sample_rate = sample_rate;
+    // ~500 ms peak-envelope decay, evaluated once per kBlockSize-sample block.
+    {
+        constexpr float kEnvTauSeconds = 0.5f;
+        const float blocks_per_tau = (static_cast<float>(sample_rate) * kEnvTauSeconds)
+                                     / static_cast<float>(kBlockSize);
+        plug->autoeq_env_decay = std::exp(-1.0f / std::max(blocks_per_tau, 1.0f));
+    }
     plug->control_values.assign(plug->meta->controls.size(), 0.0f);
     for (size_t i = 0; i < plug->meta->controls.size(); ++i) {
         plug->control_values[i] = plug->meta->controls[i].def;
@@ -820,6 +837,7 @@ static bool plugin_activate(const clap_plugin_t* p, double sample_rate,
         ch.in_fill   = 0;
         ch.out_avail = 0;
         ch.out_read  = 0;
+        ch.autoeq_peak_env = 0.f;
     }
 
     plug->spectrum.init();
@@ -851,6 +869,7 @@ static void plugin_reset(const clap_plugin_t* p) {
         ch.in_fill   = 0;
         ch.out_avail = 0;
         ch.out_read  = 0;
+        ch.autoeq_peak_env = 0.f;
         std::fill(ch.in_buf.begin(),  ch.in_buf.end(),  0.0f);
         std::fill(ch.out_buf.begin(), ch.out_buf.end(), 0.0f);
     }
@@ -965,6 +984,7 @@ void flush_chain_block_(Plugin& plug,
                 for (auto& chan : plug.chains) {
                     auto& s = chan.autoeq_ort_per_class[plug.active_autoeq_cls];
                     if (s) s->reset_state();
+                    chan.autoeq_peak_env = 0.f;
                 }
             }
             const int cls = plug.active_autoeq_cls;
@@ -973,13 +993,20 @@ void flush_chain_block_(Plugin& plug,
                 float* blk = ch_buf[ch];
                 std::array<float,15> eq_params{};
                 auto& sess = plug.chains[ch].autoeq_ort_per_class[cls];
-                // The LSTM controller was trained on audio peak-normalised to 0.5.
-                // Feed a normalised copy so the model stays in-distribution;
-                // blk is left untouched for the downstream wet/dry blend.
+                // The LSTM controller was trained on audio peak-normalised to 0.5
+                // *per ~10 s segment*. Per-128-sample peak normalisation collapses
+                // the input distribution. Use a per-channel peak-hold envelope
+                // (instant attack, ~500 ms decay) so the scale tracks signal
+                // level on the same time-scale the model was trained against.
                 std::array<float, kBlockSize> ctrl_buf;
-                float peak = 0.f;
-                for (int i = 0; i < kBlockSize; ++i) peak = std::max(peak, std::abs(blk[i]));
-                const float ctrl_scale = (peak > 1e-6f) ? (0.5f / peak) : 1.f;
+                float blk_peak = 0.f;
+                for (int i = 0; i < kBlockSize; ++i)
+                    blk_peak = std::max(blk_peak, std::abs(blk[i]));
+                auto& env = plug.chains[ch].autoeq_peak_env;
+                if (blk_peak > env) env = blk_peak;
+                else env = plug.autoeq_env_decay * env
+                          + (1.f - plug.autoeq_env_decay) * blk_peak;
+                const float ctrl_scale = (env > 1e-6f) ? (0.5f / env) : 1.f;
                 for (int i = 0; i < kBlockSize; ++i) ctrl_buf[i] = blk[i] * ctrl_scale;
                 sess->run_controller(ctrl_buf.data(),kBlockSize,eq_params.data(),15);
                 sess->swap_state();
