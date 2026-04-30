@@ -111,11 +111,13 @@ else
 fi
 
 pyscript='
-import json, sys
+import json, re, sys
 m = json.load(open(sys.argv[1]))
 print(m["model_id"])
 print(m["effect_name"])
-print(m["model_id"])  # used as bundle executable too
+# Sanitize effect_name for use as a filename (model_id can exceed 255-char OS limit)
+exe = re.sub(r"[^a-zA-Z0-9_-]", "_", m["effect_name"]).lower().strip("_")
+print(exe)
 '
 PYOUT=$(/usr/bin/env python3 -c "$pyscript" "$META_PATH")
 MODEL_ID=$(printf '%s\n' "$PYOUT" | sed -n '1p')
@@ -152,7 +154,7 @@ else
     cp -R "$HERE/ui" "$OUT/Contents/Resources/"
 fi
 
-BUNDLE_ID="com.nablafx.$MODEL_ID"
+BUNDLE_ID="com.nablafx.$EXECUTABLE"
 sed \
     -e "s|__BUNDLE_EXECUTABLE__|$EXECUTABLE|g" \
     -e "s|__BUNDLE_IDENTIFIER__|$BUNDLE_ID|g" \

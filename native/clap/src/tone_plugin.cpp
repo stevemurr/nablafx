@@ -21,6 +21,7 @@
 //   - refuses activation if host sample rate != composite_meta.sample_rate
 
 #include <algorithm>
+#include <cctype>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -92,7 +93,7 @@ enum class StageID : int {
 struct SpectrumAnalyzer {
     static constexpr int   kFFT   = 2048;   // accumulation window
     static constexpr int   kDisp  = 128;    // log-spaced display bins
-    static constexpr float kAlpha = 0.88f;  // EMA coefficient (~0.5 s at ~21 fps)
+    static constexpr float kAlpha = 0.65f;  // EMA coefficient (~110 ms at ~21 fps)
     static constexpr float kFlo   = 20.f;
     static constexpr float kFhi   = 20000.f;
 
@@ -107,6 +108,7 @@ struct SpectrumAnalyzer {
     std::mutex  xfer_mtx;
     bool        xfer_ready{false};
     std::array<std::array<float, kFFT>, kNumStages> xfer_frames{};
+    std::array<float, 5> xfer_eq_gains_snap{};
 
     // Main-thread state.
     std::array<float, kFFT>  hann{};
@@ -115,6 +117,11 @@ struct SpectrumAnalyzer {
 
     // EMA magnitude [chain_pos][disp_bin], linear.
     std::array<std::array<float, kDisp>, kNumStages> ema{};
+
+    // Last EQ band gains (dB) as applied by the LSTM — 5 bands.
+    // Written from the audio thread under xfer_mtx, read by the main thread.
+    std::array<float, 5> xfer_eq_gains{};
+    std::array<float, 5> mt_eq_gains{};
 
     // Staging for JSON build (main thread only).
     std::array<std::array<float, kFFT>, kNumStages> mt_frames{};
@@ -141,12 +148,18 @@ struct SpectrumAnalyzer {
         a.fill += take;
     }
 
+    // Audio thread: latch the 5 LSTM EQ band gains (dB) for the next transfer.
+    void set_eq_gains(const float* gains_db_5) {
+        std::copy_n(gains_db_5, 5, xfer_eq_gains.data());
+    }
+
     // Audio thread: when all accumulators are full, try to hand off to main thread.
     // Returns true when a transfer was attempted (whether or not the lock was acquired).
     bool advance_and_transfer() {
         if (accum[0].fill < kFFT) return false;
         if (xfer_mtx.try_lock()) {
             for (int p = 0; p < kNumStages; ++p) xfer_frames[p] = accum[p].buf;
+            xfer_eq_gains_snap = xfer_eq_gains;
             xfer_ready = true;
             xfer_mtx.unlock();
         }
@@ -159,8 +172,9 @@ struct SpectrumAnalyzer {
         {
             std::lock_guard<std::mutex> lk(xfer_mtx);
             if (!xfer_ready) return false;
-            mt_frames  = xfer_frames;   // copy ~48 KB while holding lock
-            xfer_ready = false;
+            mt_frames   = xfer_frames;
+            mt_eq_gains = xfer_eq_gains_snap;
+            xfer_ready  = false;
         }
         const float sr = static_cast<float>(sample_rate);
         for (int pos = 0; pos < kNumStages; ++pos) {
@@ -193,6 +207,13 @@ struct SpectrumAnalyzer {
                 s += buf;
             }
             s += ']';
+        }
+        // 5 LSTM EQ band gains in dB so JS can draw the actual filter response.
+        s += "],\"eq\":[";
+        for (int b = 0; b < 5; ++b) {
+            if (b) s += ',';
+            snprintf(buf, sizeof(buf), "%.2f", mt_eq_gains[b]);
+            s += buf;
         }
         s += "]});";
         return s;
@@ -258,7 +279,14 @@ static std::string find_bundle_contents_() {
 }
 
 static void populate_descriptor_(ModuleState& st) {
-    st.plugin_id_str = "com.nablafx." + st.tone_meta.model_id;
+    // Build a short plugin ID from effect_name (model_id can be 300+ chars,
+    // which overflows fixed-size ID buffers in some CLAP hosts).
+    std::string short_name = st.tone_meta.effect_name;
+    std::transform(short_name.begin(), short_name.end(), short_name.begin(),
+                   [](unsigned char c){ return std::tolower(c); });
+    for (auto& c : short_name)
+        if (!std::isalnum(static_cast<unsigned char>(c)) && c != '-') c = '_';
+    st.plugin_id_str = "com.nablafx." + short_name;
 
     st.feature_storage[0] = CLAP_PLUGIN_FEATURE_AUDIO_EFFECT;
     st.feature_storage[1] = CLAP_PLUGIN_FEATURE_MASTERING;
@@ -945,7 +973,15 @@ void flush_chain_block_(Plugin& plug,
                 float* blk = ch_buf[ch];
                 std::array<float,15> eq_params{};
                 auto& sess = plug.chains[ch].autoeq_ort_per_class[cls];
-                sess->run_controller(blk,kBlockSize,eq_params.data(),15);
+                // The LSTM controller was trained on audio peak-normalised to 0.5.
+                // Feed a normalised copy so the model stays in-distribution;
+                // blk is left untouched for the downstream wet/dry blend.
+                std::array<float, kBlockSize> ctrl_buf;
+                float peak = 0.f;
+                for (int i = 0; i < kBlockSize; ++i) peak = std::max(peak, std::abs(blk[i]));
+                const float ctrl_scale = (peak > 1e-6f) ? (0.5f / peak) : 1.f;
+                for (int i = 0; i < kBlockSize; ++i) ctrl_buf[i] = blk[i] * ctrl_scale;
+                sess->run_controller(ctrl_buf.data(),kBlockSize,eq_params.data(),15);
                 sess->swap_state();
                 for (int b=0;b<5;++b) {
                     if (amt.eq_band_offsets[b]==0.f) continue;
@@ -955,6 +991,13 @@ void flush_chain_block_(Plugin& plug,
                     p=(db-kGainMin)/kGainSpan;
                 }
                 plug.chains[ch].autoeq_eq.set_params(eq_params.data(),eq_params.size());
+                // Push the 5 band gain_db values (channel 0 only) for the spectrum display.
+                if (ch == 0) {
+                    float gains[5];
+                    for (int b = 0; b < 5; ++b)
+                        gains[b] = kGainMin + eq_params[kGainCh[b]] * kGainSpan;
+                    plug.spectrum.set_eq_gains(gains);
+                }
                 std::copy_n(blk,kBlockSize,dry.data());
                 plug.chains[ch].autoeq_eq.process(blk,wet_a.data(),kBlockSize);
                 blend_(blk,dry.data(),wet_a.data(),amt.autoeq_wet_mix,kBlockSize);

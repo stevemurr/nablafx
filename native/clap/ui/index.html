@@ -793,68 +793,198 @@ window.toneInit = function(state) {
     ctx.fillStyle = '#0a0a0a';
     ctx.fillRect(0, 0, W, H);
 
-    // Grid lines.
-    ctx.strokeStyle = '#1e1e1e';
+    // Center Y = 0 dB reference.
+    const CY = H / 2;
+    const DB_RANGE = 6;  // ±6 dB fills the full height
+    function deltaToY(db) {
+      return CY - clamp(db / DB_RANGE, -1, 1) * CY;
+    }
+
+    // Vertical frequency grid.
+    ctx.setLineDash([]);
     ctx.lineWidth = 1;
-    // Horizontal dB lines.
-    [-20, -40, -60, -80].forEach(db => {
-      const y = Math.round(dbToY(db, H)) + 0.5;
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
-    });
-    // Vertical frequency lines.
+    ctx.strokeStyle = '#1c1c1c';
     [50, 100, 200, 500, 1000, 2000, 5000, 10000].forEach(f => {
       const x = Math.round(freqToX(f, W)) + 0.5;
       ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
     });
 
-    // Frequency labels.
-    ctx.fillStyle = '#333';
-    ctx.font = '8px -apple-system, sans-serif';
-    ctx.textAlign = 'center';
-    [[100,'100'], [1000,'1k'], [10000,'10k']].forEach(([f, label]) => {
-      ctx.fillText(label, freqToX(f, W), H - 2);
+    // Horizontal dB grid (±2, ±4).
+    ctx.strokeStyle = '#191919';
+    [-4, -2, 2, 4].forEach(db => {
+      const y = Math.round(deltaToY(db)) + 0.5;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
     });
 
-    // dB labels.
-    ctx.textAlign = 'left';
-    [-20, -40, -60].forEach(db => {
-      ctx.fillText(db + 'dB', 2, dbToY(db, H) - 2);
+    // Labels.
+    ctx.font = '8px -apple-system, sans-serif';
+    ctx.fillStyle = '#303030';
+    ctx.textAlign = 'center';
+    [[100,'100'], [1000,'1k'], [10000,'10k']].forEach(([f, label]) => {
+      ctx.fillText(label, freqToX(f, W), H - 14);
     });
+    ctx.textAlign = 'left';
+    [[4,'+4'], [-4,'-4']].forEach(([db, label]) => {
+      ctx.fillText(label, 3, deltaToY(db) + (db > 0 ? -2 : 9));
+    });
+    ctx.fillText('0', 3, CY - 2);
+
+    // Center line (drawn first so fills render over it, then re-drawn on top).
+    function drawCenterLine(alpha) {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = '#555555';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([]);
+      ctx.beginPath(); ctx.moveTo(0, CY + 0.5); ctx.lineTo(W, CY + 0.5); ctx.stroke();
+      ctx.restore();
+    }
+    drawCenterLine(0.4);
 
     if (!data) return;
 
-    const order  = data.order;   // order[chain_pos] = stageID
-    const dbData = data.db;      // dbData[chain_pos][bin]
+    const order  = data.order;
+    const dbData = data.db;
+    const autoEQPos = order.indexOf(1);
 
-    // Draw each stage curve, back-to-front (last stage on top).
-    for (let pos = 0; pos < dbData.length; ++pos) {
-      const stageId = order[pos];
-      const color   = STAGE_COLORS[stageId] || '#888';
-      const curve   = dbData[pos];
-
+    // Very dim pre-EQ signal silhouette for spectral context.
+    if (autoEQPos > 0 && dbData[autoEQPos - 1]) {
+      ctx.save();
+      ctx.globalAlpha = 0.10;
       ctx.beginPath();
-      ctx.strokeStyle = color;
-      ctx.lineWidth   = 1.5;
-      ctx.globalAlpha = 0.85;
-      let started = false;
-      for (let b = 0; b < KDISP; ++b) {
+      ctx.moveTo(0, H);
+      for (let b = 0; b < KDISP; b++) {
         const x = freqToX(dispFreqs[b], W);
-        const y = dbToY(curve[b], H);
-        if (!started) { ctx.moveTo(x, y); started = true; }
-        else ctx.lineTo(x, y);
+        const y = dbToY(dbData[autoEQPos - 1][b], H);
+        ctx.lineTo(x, y);
       }
-      ctx.stroke();
-      ctx.globalAlpha = 1;
+      ctx.lineTo(W, H);
+      ctx.closePath();
+      ctx.fillStyle = '#777777';
+      ctx.fill();
+      ctx.restore();
     }
 
-    // Legend (top-right, chain order).
-    ctx.font = '8px -apple-system, sans-serif';
-    ctx.textAlign = 'right';
-    for (let pos = 0; pos < order.length; ++pos) {
-      const sid = order[pos];
-      ctx.fillStyle = STAGE_COLORS[sid] || '#888';
-      ctx.fillText(STAGE_NAMES[sid] || ('S' + sid), W - 3, 10 + pos * 10);
+    if (!data.eq) return;
+
+    // Compute EQ filter frequency response from the 5 LSTM band gains.
+    // Bands: low_shelf@1010Hz, peaking@110Hz, peaking@1100Hz, peaking@7kHz, high_shelf@10kHz
+    const SR = 44100;
+    const EQ_BANDS = [
+      { kind: 'low_shelf',  fc: 1010,  q: 0.707 },
+      { kind: 'peaking',    fc: 110,   q: 0.707 },
+      { kind: 'peaking',    fc: 1100,  q: 0.707 },
+      { kind: 'peaking',    fc: 7000,  q: 0.707 },
+      { kind: 'high_shelf', fc: 10000, q: 0.707 },
+    ];
+
+    // Evaluate biquad frequency response at freq f (Hz) given coeffs b0,b1,b2,a1,a2.
+    function biquadResponse(f, b0, b1, b2, a1, a2) {
+      const w = 2 * Math.PI * f / SR;
+      const cosw = Math.cos(w), sinw = Math.sin(w);
+      const cos2w = Math.cos(2*w), sin2w = Math.sin(2*w);
+      const numR = b0 + b1*cosw + b2*cos2w;
+      const numI =      b1*sinw + b2*sin2w;
+      const denR = 1  + a1*cosw + a2*cos2w;
+      const denI =      a1*sinw + a2*sin2w;
+      const mag2 = (numR*numR + numI*numI) / (denR*denR + denI*denI);
+      return 10 * Math.log10(Math.max(mag2, 1e-20));
     }
+
+    // RBJ cookbook biquad coefficients for each band type.
+    function bandCoeffs(band, gain_db) {
+      const A  = Math.pow(10, gain_db / 40);
+      const w0 = 2 * Math.PI * band.fc / SR;
+      const cw = Math.cos(w0), sw = Math.sin(w0);
+      const alpha = sw / (2 * band.q);
+      if (band.kind === 'peaking') {
+        const b0 =  1 + alpha*A, b1 = -2*cw, b2 = 1 - alpha*A;
+        const a0 =  1 + alpha/A, a1 = -2*cw, a2 = 1 - alpha/A;
+        return [b0/a0, b1/a0, b2/a0, a1/a0, a2/a0];
+      } else if (band.kind === 'low_shelf') {
+        const sq = 2*Math.sqrt(A)*alpha;
+        const b0 =  A*((A+1)-(A-1)*cw+sq),  b1 =  2*A*((A-1)-(A+1)*cw),   b2 = A*((A+1)-(A-1)*cw-sq);
+        const a0 =     (A+1)+(A-1)*cw+sq,    a1 =   -2*((A-1)+(A+1)*cw),   a2 =   (A+1)+(A-1)*cw-sq;
+        return [b0/a0, b1/a0, b2/a0, a1/a0, a2/a0];
+      } else { // high_shelf
+        const sq = 2*Math.sqrt(A)*alpha;
+        const b0 =  A*((A+1)+(A-1)*cw+sq),  b1 = -2*A*((A-1)+(A+1)*cw),   b2 = A*((A+1)+(A-1)*cw-sq);
+        const a0 =     (A+1)-(A-1)*cw+sq,    a1 =    2*((A-1)-(A+1)*cw),   a2 =   (A+1)-(A-1)*cw-sq;
+        return [b0/a0, b1/a0, b2/a0, a1/a0, a2/a0];
+      }
+    }
+
+    // Sum filter response (dB) across all 5 bands at each display frequency.
+    const eqGains = data.eq || [0,0,0,0,0];
+    const xs     = dispFreqs.map(f => freqToX(f, W));
+    const yDelta = dispFreqs.map(f => {
+      let totalDb = 0;
+      for (let b = 0; b < 5; b++) {
+        const [b0,b1,b2,a1,a2] = bandCoeffs(EQ_BANDS[b], eqGains[b]);
+        totalDb += biquadResponse(f, b0, b1, b2, a1, a2);
+      }
+      return deltaToY(totalDb);
+    });
+
+    // Closed polygon from center line → EQ curve → back to center.
+    function buildDeltaPath() {
+      ctx.beginPath();
+      ctx.moveTo(xs[0], CY);
+      for (let b = 0; b < KDISP; b++) ctx.lineTo(xs[b], yDelta[b]);
+      ctx.lineTo(xs[KDISP - 1], CY);
+      ctx.closePath();
+    }
+
+    // ── Boost fill: clip to top half, teal ──────────────────────
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, W, CY); ctx.clip();
+    buildDeltaPath();
+    ctx.fillStyle = 'rgba(76, 201, 168, 0.78)';
+    ctx.fill();
+    ctx.restore();
+
+    // ── Cut fill: clip to bottom half, orange ───────────────────
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, CY, W, H - CY); ctx.clip();
+    buildDeltaPath();
+    ctx.fillStyle = 'rgba(231, 111, 81, 0.72)';
+    ctx.fill();
+    ctx.restore();
+
+    // ── Center line on top of fills ─────────────────────────────
+    drawCenterLine(0.9);
+
+    // ── EQ delta curve with glow ────────────────────────────────
+    ctx.save();
+    ctx.shadowBlur  = 8;
+    ctx.shadowColor = STAGE_COLORS[1];
+    ctx.strokeStyle = STAGE_COLORS[1];
+    ctx.lineWidth   = 2;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    for (let b = 0; b < KDISP; b++)
+      b === 0 ? ctx.moveTo(xs[b], yDelta[b]) : ctx.lineTo(xs[b], yDelta[b]);
+    ctx.stroke();
+    ctx.restore();
+
+    // ── Legend ───────────────────────────────────────────────────
+    ctx.setLineDash([]);
+    ctx.font = '7px -apple-system, sans-serif';
+    ctx.textAlign = 'right';
+    const lx = W - 4;
+    ctx.fillStyle = 'rgba(76, 201, 168, 0.90)'; ctx.fillText('▲ BOOST', lx,  9);
+    ctx.fillStyle = 'rgba(231, 111, 81, 0.90)'; ctx.fillText('▼ CUT',   lx, 19);
+
+    // ── Diagnostic: show raw band gains so we can see LSTM output ─
+    const bandNames = ['LS', '110', '1k', '7k', 'HS'];
+    ctx.font = '8px monospace';
+    ctx.textAlign = 'left';
+    eqGains.forEach((g, i) => {
+      const s = (g >= 0 ? '+' : '') + g.toFixed(1);
+      const hue = g > 0.5 ? '76,201,168' : g < -0.5 ? '231,111,81' : '100,100,100';
+      ctx.fillStyle = `rgba(${hue},0.85)`;
+      ctx.fillText(`${bandNames[i]}:${s}`, 4 + i * 64, H - 3);
+    });
   }
 
   // Called with no data on init to draw the empty grid.
