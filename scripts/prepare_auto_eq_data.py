@@ -42,6 +42,7 @@ import torch
 import torchaudio
 
 from nablafx.data.transforms import BrownNoiseTargetEQ, EmpiricalTargetEQ
+from nablafx.processors.dsp import biquad, sosfilt_via_fsm
 
 
 _CLASS_TO_STEM = {
@@ -185,6 +186,49 @@ def _musdb_stem(song_dir: Path, target_class: str, sr_target: int) -> np.ndarray
     return _load_audio_resampled(str(p), sr_target)
 
 
+def _augment_pre_eq(
+    dry: np.ndarray, sr: int, rng: np.random.Generator,
+) -> np.ndarray:
+    """Apply a random EQ to the dry signal so the empirical solver sees a
+    spectrum that meaningfully differs from the class average.
+
+    Without augmentation, dry stems already mostly sit near the class long-term
+    average — the solver computes a near-zero correction on most clips and the
+    controller has nothing to discriminate. Pre-EQing dry with random shelves
+    and peaks forces real per-clip spectral diversity into the (input, target)
+    pairs.
+
+    Composition: random low-shelf + random high-shelf + 1-2 random peaking
+    bands. Gains in [-6, +6] dB, Q in [0.5, 1.5] for peaks. Frequencies sampled
+    log-uniformly within reasonable bands.
+    """
+    bands: list[tuple[str, float, float, float]] = []
+    bands.append(("low_shelf",  float(rng.uniform(80.0, 250.0)),
+                  float(rng.uniform(-6.0, 6.0)), 0.707))
+    bands.append(("high_shelf", float(rng.uniform(4000.0, 10000.0)),
+                  float(rng.uniform(-6.0, 6.0)), 0.707))
+    n_peaks = int(rng.integers(1, 3))
+    for _ in range(n_peaks):
+        log_f = rng.uniform(np.log10(150.0), np.log10(8000.0))
+        bands.append(("peaking", float(10.0 ** log_f),
+                      float(rng.uniform(-6.0, 6.0)),
+                      float(rng.uniform(0.5, 1.5))))
+
+    x_t = torch.from_numpy(dry).view(1, 1, -1)
+    sos_rows: list[torch.Tensor] = []
+    for kind, fc, gain_db, q in bands:
+        b, a = biquad(
+            torch.tensor([gain_db], dtype=torch.float32),
+            torch.tensor([fc], dtype=torch.float32),
+            torch.tensor([q], dtype=torch.float32),
+            sr, kind,
+        )
+        sos_rows.append(torch.cat((b, a), dim=-1).view(1, 6))
+    sos = torch.stack(sos_rows, dim=1)  # [1, n_sos, 6]
+    y_t = sosfilt_via_fsm(sos, x_t)
+    return y_t.view(-1).numpy().astype(np.float32)
+
+
 def _segment(x: np.ndarray, win: int, hop: int | None = None) -> list[np.ndarray]:
     """Non-overlapping (hop=win by default) segments of length `win`. Drops
     the trailing partial window."""
@@ -206,6 +250,8 @@ def _run_musdb(
     max_trainval: int | None,
     max_test: int | None,
     rng: np.random.Generator,
+    augment_pre_eq: bool = False,
+    augment_test: bool = False,
 ) -> None:
     train_root = src_root / "train"
     test_root = src_root / "test"
@@ -258,6 +304,17 @@ def _run_musdb(
                 # Per-segment normalize peak to ~0.5 so EQ has headroom (matches
                 # the synth path).
                 dry = (seg * (0.5 / seg_peak)).astype(np.float32)
+
+                # Optional pre-EQ augmentation to inflate intra-class spectral
+                # variance. Only applied to trainval; test stays clean so the
+                # eval reflects natural-signal performance.
+                if augment_pre_eq and (split == "trainval" or augment_test):
+                    dry = _augment_pre_eq(dry, sr, rng)
+                    # Re-normalize so per-segment peak stays ~0.5 after the
+                    # augmenting filter (which can boost or cut peak).
+                    aug_peak = float(np.max(np.abs(dry)))
+                    if aug_peak > 1e-6:
+                        dry = (dry * (0.5 / aug_peak)).astype(np.float32)
 
                 x_t = torch.from_numpy(dry).view(1, 1, -1)
                 wet_t, gains_db = eq(x_t)
@@ -312,6 +369,11 @@ def main() -> None:
                     help="MUSDB only: cap on trainval window count.")
     ap.add_argument("--max-test", type=int, default=None,
                     help="MUSDB only: cap on test window count.")
+    ap.add_argument("--augment-pre-eq", action="store_true",
+                    help="Apply random pre-EQ to dry side of trainval pairs to "
+                         "inflate intra-class spectral variance.")
+    ap.add_argument("--augment-test", action="store_true",
+                    help="Also augment test pairs (default: test stays clean).")
     ap.add_argument("--sample-rate", type=int, default=44100)
     ap.add_argument("--clip-seconds", type=float, default=3.0)
     ap.add_argument("--num-trainval", type=int, default=300)
@@ -347,6 +409,8 @@ def main() -> None:
             max_trainval=args.max_trainval,
             max_test=args.max_test,
             rng=rng,
+            augment_pre_eq=args.augment_pre_eq,
+            augment_test=args.augment_test,
         )
         return
 

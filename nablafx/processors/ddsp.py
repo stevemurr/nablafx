@@ -193,7 +193,7 @@ class ParametricEQ(torch.nn.Module):
         freeze_freqs: bool = False,
     ):
         super().__init__()
-        assert control_type in ["static", "static-cond", "dynamic", "dynamic-cond"]
+        assert control_type in ["static", "static-cond", "dynamic", "dynamic-cond", "dynamic-spectral"]
         self.sample_rate = sample_rate
         self.min_gain_db = min_gain_db
         self.max_gain_db = max_gain_db
@@ -230,7 +230,7 @@ class ParametricEQ(torch.nn.Module):
         self.num_control_params = 15
 
         # used to downsample control_params
-        if control_type in ["dynamic", "dynamic-cond"]:
+        if control_type in ["dynamic", "dynamic-cond", "dynamic-spectral"]:
             self.pool = torch.nn.AvgPool1d(kernel_size=block_size)
 
     def get_param_dict(self, params: torch.Tensor) -> Dict[str, torch.Tensor]:

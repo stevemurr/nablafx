@@ -55,6 +55,8 @@ class GreyBoxModel(torch.nn.Module):
         dyn_num_layers: int = 1,
         dyn_cond_block_size: int = 128,
         dyn_cond_num_layers: int = 1,
+        dyn_spectral_hidden_dim: int = 64,
+        dyn_spectral_feat_dim: int = 32,
     ) -> None:
         super().__init__()
         self.num_controls = num_controls
@@ -69,6 +71,8 @@ class GreyBoxModel(torch.nn.Module):
             dyn_num_layers,
             dyn_cond_block_size,
             dyn_cond_num_layers,
+            dyn_spectral_hidden_dim,
+            dyn_spectral_feat_dim,
         )
 
         print("\nGreyBoxModel:")

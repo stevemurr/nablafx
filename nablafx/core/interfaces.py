@@ -2,7 +2,14 @@ import torch
 
 from typing import List
 
-from nablafx.controllers import DummyController, StaticController, StaticCondController, DynamicController, DynamicCondController
+from nablafx.controllers import (
+    DummyController,
+    StaticController,
+    StaticCondController,
+    DynamicController,
+    DynamicCondController,
+    SpectralDynamicController,
+)
 
 
 class Processor(torch.nn.Module):
@@ -50,6 +57,8 @@ class Controller(torch.nn.Module):
         dyn_num_layers: int = 1,
         dyn_cond_block_size: int = 128,
         dyn_cond_num_layers: int = 1,
+        dyn_spectral_hidden_dim: int = 64,
+        dyn_spectral_feat_dim: int = 32,
     ):
         super().__init__()
         self.num_controls = num_controls
@@ -85,6 +94,17 @@ class Controller(torch.nn.Module):
                         prc.lr_multiplier,
                     )
                 )
+            elif prc.control_type == "dynamic-spectral":
+                self.controllers.append(
+                    SpectralDynamicController(
+                        prc.num_control_params,
+                        block_size=dyn_block_size,
+                        num_layers=dyn_num_layers,
+                        hidden_dim=dyn_spectral_hidden_dim,
+                        feat_dim=dyn_spectral_feat_dim,
+                        lr_multiplier=prc.lr_multiplier,
+                    )
+                )
             elif prc.control_type == "dynamic-cond":
                 self.controllers.append(
                     DynamicCondController(
@@ -112,6 +132,8 @@ class Controller(torch.nn.Module):
             elif isinstance(ctrl, StaticCondController):
                 control_params.append(ctrl(controls=controls))
             elif isinstance(ctrl, DynamicController):
+                control_params.append(ctrl(x=x))
+            elif isinstance(ctrl, SpectralDynamicController):
                 control_params.append(ctrl(x=x))
             elif isinstance(ctrl, DynamicCondController):
                 control_params.append(ctrl(x=x, controls=controls))

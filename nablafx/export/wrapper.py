@@ -27,7 +27,11 @@ from typing import List, Sequence, Tuple
 
 import torch
 
-from nablafx.controllers.controllers import DynamicController, DynamicCondController
+from nablafx.controllers.controllers import (
+    DynamicController,
+    DynamicCondController,
+    SpectralDynamicController,
+)
 from nablafx.core.models import BlackBoxModel
 from nablafx.processors.components import TFiLM, TinyTFiLM, TVFiLMCond
 from nablafx.processors.lstm import LSTM
@@ -42,6 +46,7 @@ STATEFUL_CLASSES: Tuple[type, ...] = (
     TinyTFiLM,
     DynamicController,
     DynamicCondController,
+    SpectralDynamicController,
 )
 
 

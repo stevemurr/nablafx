@@ -14,6 +14,7 @@ from .controllers import (
     StaticCondController,
     DynamicController,
     DynamicCondController,
+    SpectralDynamicController,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "StaticCondController",
     "DynamicCondController",
     "DynamicController",
+    "SpectralDynamicController",
 ]
