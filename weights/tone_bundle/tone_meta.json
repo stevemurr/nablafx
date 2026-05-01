@@ -134,6 +134,24 @@
       "skew": 1.0,
       "unit": ""
     },
+    "EQR": {
+      "id": "EQR",
+      "name": "EQ Range",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "skew": 1.0,
+      "unit": ""
+    },
+    "EQS": {
+      "id": "EQS",
+      "name": "EQ Speed",
+      "min": 10.0,
+      "max": 500.0,
+      "default": 100.0,
+      "skew": 1.0,
+      "unit": "ms"
+    },
     "EQ0": {
       "id": "EQ0",
       "name": "EQ Low Shelf",

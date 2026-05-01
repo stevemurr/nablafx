@@ -524,6 +524,9 @@ struct ChannelChain {
     std::unique_ptr<OrtMiniSession>        la2a_ort;
     TruePeakCeiling                        ceiling;
 
+    // EMA-smoothed LSTM output params [0,1] — 15 channels, neutral at 0.5.
+    std::array<float, 15> autoeq_smoothed_params{};
+
     // 128-sample accumulator: kBlockSize input samples in, then a chain pass,
     // then kBlockSize output samples ready. Output ring fills before any reads
     // so the first kBlockSize host samples produce silence (latency reported
@@ -704,6 +707,9 @@ static const clap_plugin_latency_t s_ext_latency = {latency_get};
 // CLAP extension: state (save / load)
 // ---------------------------------------------------------------------------
 
+// Forward declaration — defined with the GUI extension below.
+static void gui_send_full_state_(Plugin* plug);
+
 static bool state_save(const clap_plugin_t* p, const clap_ostream_t* stream) {
     auto* plug = static_cast<Plugin*>(p->plugin_data);
     nlohmann::json j;
@@ -747,6 +753,9 @@ static bool state_load(const clap_plugin_t* p, const clap_istream_t* stream) {
         plug->host->get_extension(plug->host, CLAP_EXT_PARAMS));
     if (host_params && host_params->rescan)
         host_params->rescan(plug->host, CLAP_PARAM_RESCAN_VALUES);
+    // If the GUI is already open, push the restored state to it immediately.
+    if (plug->gui_state)
+        gui_send_full_state_(plug);
     return true;
 }
 
@@ -780,11 +789,6 @@ static bool plugin_activate(const clap_plugin_t* p, double sample_rate,
                                      / static_cast<float>(kBlockSize);
         plug->autoeq_env_decay = std::exp(-1.0f / std::max(blocks_per_tau, 1.0f));
     }
-    plug->control_values.assign(plug->meta->controls.size(), 0.0f);
-    for (size_t i = 0; i < plug->meta->controls.size(); ++i) {
-        plug->control_values[i] = plug->meta->controls[i].def;
-    }
-
     plug->leveler = LufsLeveler(LufsLeveler::Config{
         /*target_lufs=*/g_state->tone_meta.leveler.target_lufs,
     });
@@ -863,6 +867,7 @@ static bool plugin_activate(const clap_plugin_t* p, double sample_rate,
         ch.ceiling = TruePeakCeiling(tcfg);
         ch.ceiling.reset(sample_rate);
 
+        ch.autoeq_smoothed_params.fill(0.5f);
         ch.in_fill   = 0;
         ch.out_avail = 0;
         ch.out_read  = 0;
@@ -895,6 +900,7 @@ static void plugin_reset(const clap_plugin_t* p) {
         }
         if (ch.la2a_ort)   ch.la2a_ort->reset_state();
         ch.ceiling.reset(plug->sample_rate);
+        ch.autoeq_smoothed_params.fill(0.5f);
         ch.in_fill   = 0;
         ch.out_avail = 0;
         ch.out_read  = 0;
@@ -920,12 +926,15 @@ struct AmountSnapshot {
     float la2a_wet, la2a_pr_norm, la2a_comp_or_limit;
     float sp_wet, sp_rate, sp_depth;
     float trim_lin;
+    float eq_range;
+    float eq_speed_ms;
 };
 
 AmountSnapshot resolve_amount_(const Plugin& plug) {
     float lvl=1.f,lvt=-14.f,sdr=0.f,svo=0.f,smx=0.5f,shf=20.f,sth=0.f,sbs=0.f;
     float cl=1.f,cmp=50.f,eq=0.5f,trm_db=0.f;
     float olv=1.f,olt=-14.f,spw=0.f,spr=0.8f,spd=0.5f;
+    float eqr=1.f,eqs=100.f;
     float eq_off[5]={};
     int   cls_idx=plug.active_autoeq_cls;
     for (size_t i=0;i<plug.meta->controls.size();++i) {
@@ -938,6 +947,7 @@ AmountSnapshot resolve_amount_(const Plugin& plug) {
         else if(c.id=="C_L") cl=v;
         else if(c.id=="CMP") cmp=v; else if(c.id=="EQ")  eq=v;
         else if(c.id=="CLS") cls_idx=static_cast<int>(std::lround(v));
+        else if(c.id=="EQR") eqr=v; else if(c.id=="EQS") eqs=v;
         else if(c.id=="EQ0") eq_off[0]=v; else if(c.id=="EQ1") eq_off[1]=v;
         else if(c.id=="EQ2") eq_off[2]=v; else if(c.id=="EQ3") eq_off[3]=v;
         else if(c.id=="EQ4") eq_off[4]=v; else if(c.id=="OLV") olv=v;
@@ -958,6 +968,8 @@ AmountSnapshot resolve_amount_(const Plugin& plug) {
     s.la2a_wet=cmp/100.f; s.la2a_pr_norm=cmp/100.f;
     s.la2a_comp_or_limit=cl;
     s.trim_lin=std::pow(10.f,trm_db/20.f);
+    s.eq_range=eqr;
+    s.eq_speed_ms=eqs;
     return s;
 }
 
@@ -1014,29 +1026,27 @@ void flush_chain_block_(Plugin& plug,
                     auto& s = chan.autoeq_ort_per_class[plug.active_autoeq_cls];
                     if (s) s->reset_state();
                     chan.autoeq_peak_env = 0.f;
+                    chan.autoeq_smoothed_params.fill(0.5f);
                 }
             }
             const int cls = plug.active_autoeq_cls;
-            // The controller's output dimension differs by DSP kind:
-            //   parametric_eq_5band  → 15 (5 bands × {gain, freq, Q})
-            //   spectral_mask_eq     → n_bands (32 in the production model)
-            // Source it from the per-class meta so we don't hardcode here.
+            // DSP kind varies per class (PEQ = 15 params, SpectralMask = 32).
             const auto& cls_dsp = g_state->autoeq_dsp_per_class[cls];
             const bool  is_spec = (cls_dsp.kind == "spectral_mask_eq");
             const int   n_params = is_spec
                 ? std::get<SpectralMaskEqParams>(cls_dsp.params).num_control_params
                 : std::get<ParametricEq5BandParams>(cls_dsp.params).num_control_params;
-            std::array<float, 64> eq_params_storage{};  // big enough for both kinds
+            std::array<float, 64> eq_params_storage{};
             float* eq_params = eq_params_storage.data();
+            // EMA coefficient for speed control: fast (10 ms) ≈ 0.75, slow (500 ms) ≈ 0.994.
+            const float alpha = std::exp(
+                -static_cast<float>(kBlockSize) /
+                (static_cast<float>(plug.sample_rate) * amt.eq_speed_ms * 0.001f));
             float* ch_buf[2] = {work_l, work_r};
             for (uint32_t ch=0; ch<n_ch; ++ch) {
                 float* blk = ch_buf[ch];
                 auto& sess = plug.chains[ch].autoeq_ort_per_class[cls];
-                // The LSTM controller was trained on audio peak-normalised to 0.5
-                // *per ~10 s segment*. Per-128-sample peak normalisation collapses
-                // the input distribution. Use a per-channel peak-hold envelope
-                // (instant attack, ~500 ms decay) so the scale tracks signal
-                // level on the same time-scale the model was trained against.
+                // Peak-hold envelope normalisation to match training distribution.
                 std::array<float, kBlockSize> ctrl_buf;
                 float blk_peak = 0.f;
                 for (int i = 0; i < kBlockSize; ++i)
@@ -1050,37 +1060,36 @@ void flush_chain_block_(Plugin& plug,
                 sess->run_controller(ctrl_buf.data(), kBlockSize, eq_params, n_params);
                 sess->swap_state();
 
-                if (!is_spec) {
-                    // Per-band manual EQ-offset trim (only meaningful for the
-                    // 5-band parametric kind). amt.eq_band_offsets has 5 entries.
-                    for (int b = 0; b < 5; ++b) {
-                        if (amt.eq_band_offsets[b] == 0.f) continue;
-                        float& p = eq_params[kGainCh[b]];
-                        float db = kGainMin + p * kGainSpan + amt.eq_band_offsets[b];
-                        db = std::clamp(db, kGainMin, kGainMin + kGainSpan);
-                        p  = (db - kGainMin) / kGainSpan;
-                    }
-                }
-
                 std::copy_n(blk, kBlockSize, dry.data());
                 if (is_spec) {
+                    // Spectral mask: apply LSTM output directly (no smoothing/range).
                     auto& dsp = plug.chains[ch].autoeq_spec_per_class[cls];
                     dsp->set_params(eq_params, n_params);
                     dsp->process(blk, wet_a.data(), kBlockSize);
-                    // No 5-band display for spectral mask — clear so the GUI
-                    // doesn't show stale PEQ band gains.
                     if (ch == 0) {
-                        float gains[5] = {0.f, 0.f, 0.f, 0.f, 0.f};
+                        float gains[5] = {};
                         plug.spectrum.set_eq_gains(gains);
                     }
                 } else {
+                    // PEQ: speed-smooth then range-scale, then manual offsets.
+                    auto& smoothed = plug.chains[ch].autoeq_smoothed_params;
+                    for (int p = 0; p < n_params; ++p)
+                        smoothed[p] = alpha * smoothed[p] + (1.f - alpha) * eq_params[p];
+                    std::array<float, 15> final_params;
+                    std::copy_n(smoothed.data(), n_params, final_params.data());
+                    for (int b = 0; b < 5; ++b) {
+                        float gain_db = kGainMin + final_params[kGainCh[b]] * kGainSpan;
+                        gain_db = gain_db * amt.eq_range + amt.eq_band_offsets[b];
+                        gain_db = std::clamp(gain_db, kGainMin, kGainMin + kGainSpan);
+                        final_params[kGainCh[b]] = (gain_db - kGainMin) / kGainSpan;
+                    }
                     auto& dsp = plug.chains[ch].autoeq_peq_per_class[cls];
-                    dsp->set_params(eq_params, n_params);
+                    dsp->set_params(final_params.data(), n_params);
                     dsp->process(blk, wet_a.data(), kBlockSize);
                     if (ch == 0) {
                         float gains[5];
                         for (int b = 0; b < 5; ++b)
-                            gains[b] = kGainMin + eq_params[kGainCh[b]] * kGainSpan;
+                            gains[b] = kGainMin + final_params[kGainCh[b]] * kGainSpan;
                         plug.spectrum.set_eq_gains(gains);
                     }
                 }

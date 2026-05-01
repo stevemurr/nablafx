@@ -302,7 +302,7 @@
 
 const PROCESSORS = [
   { id: 0, name: 'IN LEVEL',  params: ['LVL', 'LVT'],              wetParams: ['LVL'] },
-  { id: 1, name: 'AUTO EQ',   params: ['CLS', 'EQ', 'EQ0','EQ1','EQ2','EQ3','EQ4'], wetParams: ['EQ'] },
+  { id: 1, name: 'AUTO EQ',   params: ['CLS', 'EQ', 'EQR', 'EQS', 'EQ0','EQ1','EQ2','EQ3','EQ4'], wetParams: ['EQ'] },
   { id: 2, name: 'SATURATOR', params: ['SDR', 'SVO', 'SMX', 'SHF', 'STH', 'SBS'], wetParams: ['SMX'] },
   { id: 3, name: 'COMPRESSOR',params: ['C_L', 'CMP'],              wetParams: ['CMP'] },
   { id: 4, name: 'OUT LEVEL', params: ['OLV', 'OLT'],              wetParams: ['OLV'] },
@@ -334,6 +334,7 @@ function formatValue(id, val) {
   }
   if (unit === 'LUFS') return `${val.toFixed(1)} L`;
   if (unit === 'Hz')   return `${val.toFixed(2)} Hz`;
+  if (unit === 'ms')   return `${Math.round(val)} ms`;
   if (unit === 'switch') return val >= 0.5 ? 'LIMIT' : 'COMP';
   if (unit === '' && m.max <= 1) return `${Math.round(val * 100)}%`;
   return val.toFixed(2);
