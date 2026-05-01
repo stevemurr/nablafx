@@ -59,6 +59,10 @@ class PluginMeta:
     receptive_field: int        # total RF in samples; plugin ring-buffers (rf - 1)
     latency_samples: int        # reported to host via clap_plugin_latency
     num_controls: int
+    trace_len: int = 0          # fixed audio_in length the ONNX was traced at
+                                # (host must call with exactly this many samples;
+                                # 0 means the bundle predates the trace_len field
+                                # and the host should treat audio_in as variable)
     # "nn"  — single ONNX graph (BlackBox); state_tensors / input_names / output_names populated
     # "dsp" — pure DSP (e.g. trained nonlinearity); no model.onnx, dsp_blocks populated
     # "nn+dsp" — controller NN exported to ONNX, downstream DSP runs natively (grey-box)

@@ -210,8 +210,14 @@ def export_bundle(inputs: ExportInputs) -> PluginMeta:
     #     that block size; cond-NN runs one timestep per ORT call.
     #   * Plain TCN/GCN trace at ``MIN_TRACE_BLOCK_LEN`` since they have no
     #     intra-graph time-dependent reshape.
-    trace_len = int(getattr(processor, "cond_block_size",
-                            max(MIN_TRACE_BLOCK_LEN, rf + 512)))
+    # Conditioned processors (TVFiLM-style cond_nn) require trace_len ==
+    # cond_block_size so the per-frame conditioner emits the right number of
+    # frames. Unconditioned processors (cond_type=None) have no such
+    # constraint, so fall through to the rf-driven default — this is what
+    # makes a long-RF unconditioned TCN exportable.
+    cond_block = getattr(processor, "cond_block_size", None)
+    has_real_cond = bool(getattr(processor, "cond_type", None)) and cond_block
+    trace_len = int(cond_block) if has_real_cond else max(MIN_TRACE_BLOCK_LEN, rf + 512)
     example = _example_inputs(wrapper, entries, num_controls, trace_len)
     in_names, out_names = _io_names(entries, num_controls)
 
@@ -270,6 +276,7 @@ def export_bundle(inputs: ExportInputs) -> PluginMeta:
         receptive_field=rf,
         latency_samples=latency_for(causal, rf),
         num_controls=num_controls,
+        trace_len=trace_len,
         controls=controls,
         state_tensors=state_tensors,
         input_names=in_names,
