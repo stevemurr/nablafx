@@ -98,13 +98,15 @@ public:
         // shows up as graininess on kick/bass content.
         bin_gain_.assign(n_freq_, 1.0f);
         bin_gain_target_.assign(n_freq_, 1.0f);
-        // ~25 ms time constant evaluated per set_params tick (every block_size
-        // samples). alpha = exp(-1 / N_blocks_per_tau).
-        constexpr float kMaskTauSeconds = 0.025f;
-        const float blocks_per_tau =
-            (static_cast<float>(cfg_.sample_rate) * kMaskTauSeconds)
-            / static_cast<float>(cfg_.block_size);
-        mask_smooth_alpha_ = std::exp(-1.0f / std::max(blocks_per_tau, 1.0f));
+        // Smoother time constant defaults to 25 ms; runtime can override via
+        // set_speed_tau_ms(). Stored as ms so the (re)compute is one std::exp
+        // and only fires when the user changes the value.
+        speed_tau_ms_      = 25.0f;
+        speed_tau_cached_  = -1.0f;  // forces alpha recompute on first set_params
+        recompute_alpha_();
+
+        // Range scale: 1.0 = full trained ±max_gain_db, 0.0 = bypass.
+        range_norm_ = 1.0f;
 
         // Scratch buffers for FFT.
         windowed_.assign(n_fft_, 0.0f);
@@ -121,6 +123,20 @@ public:
         ola_scale_ = 1.0f / (2.0f * static_cast<float>(n_fft_));
     }
 
+    // Runtime control: scale all per-band gains by ``r`` ∈ [0, 1] before
+    // applying. r=1 → full predicted EQ; r=0 → flat (bypass). Smooth on the
+    // user side; here it just multiplies into band_db every set_params tick.
+    void set_range_norm(float r) {
+        range_norm_ = std::clamp(r, 0.0f, 1.0f);
+    }
+
+    // Runtime control: time constant (ms) for the per-block bin-gain smoother.
+    // ~5 ms = snappy / transient-tracking; ~200 ms = slow / mastering-style.
+    void set_speed_tau_ms(float ms) {
+        if (ms < 0.1f) ms = 0.1f;
+        speed_tau_ms_ = ms;
+    }
+
     // Apply latest controller output: ``params`` holds n_bands sigmoid values
     // in [0, 1]. Updates the per-bin linear gain mask.
     void set_params(const float* params, std::size_t n) {
@@ -132,14 +148,18 @@ public:
         }
         // Per-band gain in dB, then per-bin via mel_band_to_bin_ matrix.
         const float gain_span = cfg_.max_gain_db - cfg_.min_gain_db;
-        // Per-band dB
+        // Per-band dB. Range knob is applied as a scale around 0 dB so the
+        // user's "Range" reduces the predicted EQ's depth proportionally
+        // without flipping the curve's sign or biasing the mid bands.
         std::vector<float> band_db(n_bands_, 0.0f);
         for (int b = 0; b < n_bands_; ++b) {
             float g = params[b];
             if (g < 0.0f) g = 0.0f;
             if (g > 1.0f) g = 1.0f;
-            band_db[b] = cfg_.min_gain_db + g * gain_span;
+            band_db[b] = (cfg_.min_gain_db + g * gain_span) * range_norm_;
         }
+        // Refresh the smoother's alpha if the user moved the Speed knob.
+        if (speed_tau_ms_ != speed_tau_cached_) recompute_alpha_();
         // Step 1: per-bin gain in dB (linear band→bin mix).
         for (int k = 0; k < n_freq_; ++k) {
             float sum = 0.0f;
@@ -270,6 +290,14 @@ private:
         out_avail_ += hop_;
     }
 
+    void recompute_alpha_() {
+        const float blocks_per_tau =
+            (static_cast<float>(cfg_.sample_rate) * speed_tau_ms_ * 0.001f)
+            / static_cast<float>(cfg_.block_size);
+        mask_smooth_alpha_ = std::exp(-1.0f / std::max(blocks_per_tau, 1.0f));
+        speed_tau_cached_  = speed_tau_ms_;
+    }
+
     void build_freq_smoothing_kernel_(int sr, int n_fft, float octave_frac) {
         // For each output bin k at frequency f_k, build a Gaussian kernel of
         // sigma proportional to f_k (constant fraction of an octave). Stored
@@ -380,6 +408,10 @@ private:
     std::vector<float> bin_gain_target_; // [n_freq] linear, freq-smoothed controller target
     std::vector<float> bin_db_buf_;      // [n_freq] scratch for per-bin dB before freq smoothing
     float              mask_smooth_alpha_{0.f};  // per-set_params time decay
+    // Runtime knobs.
+    float              range_norm_{1.0f};        // [0, 1] scale on predicted band_db
+    float              speed_tau_ms_{25.0f};     // user-set time constant
+    float              speed_tau_cached_{-1.f};  // last value alpha was computed at
     // Ragged 1/6-octave Gaussian kernel: per output bin k, the apply loop
     // reads len kernels starting at woff and weights them against
     // bin_db_buf_[start..start+len-1].

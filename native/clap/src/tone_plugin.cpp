@@ -1092,8 +1092,12 @@ void flush_chain_block_(Plugin& plug,
 
                 std::copy_n(blk, kBlockSize, dry.data());
                 if (is_spec) {
-                    // Spectral mask: apply LSTM output directly (no smoothing/range).
+                    // Spectral mask: range scales the predicted dB curve toward
+                    // 0 dB; speed sets the bin-gain smoother time constant. Both
+                    // applied inside set_params on each tick.
                     auto& dsp = plug.chains[ch].autoeq_spec_per_class[cls];
+                    dsp->set_range_norm(amt.eq_range);
+                    dsp->set_speed_tau_ms(amt.eq_speed_ms);
                     dsp->set_params(eq_params, n_params);
                     dsp->process(blk, wet_a.data(), kBlockSize);
                     if (ch == 0) {

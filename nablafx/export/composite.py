@@ -129,6 +129,12 @@ def _build_default_meta(
                 "default": float(default_idx), "skew": 1.0, "unit": "enum"},
         "EQ":  {"id": "EQ",  "name": "Auto EQ",     "min": 0.0,   "max": 1.0,
                 "default": 0.0, "skew": 1.0, "unit": ""},
+        # EQR / EQS only have an effect when the active class routes through a
+        # spectral_mask_eq DSP block; they are no-ops on parametric_eq_5band.
+        "EQR": {"id": "EQR", "name": "EQ Range",    "min": 0.0,   "max": 1.0,
+                "default": 1.0, "skew": 1.0, "unit": ""},
+        "EQS": {"id": "EQS", "name": "EQ Speed",    "min": 10.0,  "max": 500.0,
+                "default": 100.0, "skew": 1.0, "unit": "ms"},
         "EQ0": {"id": "EQ0", "name": "EQ Low Shelf","min": -9.0,  "max": 9.0,
                 "default": 0.0, "skew": 1.0, "unit": "dB"},
         "EQ1": {"id": "EQ1", "name": "EQ 110 Hz",   "min": -9.0,  "max": 9.0,
