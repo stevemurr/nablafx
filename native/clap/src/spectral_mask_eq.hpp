@@ -83,8 +83,22 @@ public:
         // Mel filterbank.
         build_mel_(cfg_.sample_rate, n_fft_, n_bands_, cfg_.f_min, cfg_.f_max);
 
-        // Per-bin gain mask (linear), starts as unity.
+        // Per-bin gain mask (linear). bin_gain_target_ is the controller's
+        // most recent prediction; bin_gain_ is the smoothed value the FFT
+        // frame actually applies. set_params updates the target every
+        // block_size samples (~2.9 ms at 44.1k); the FFT consumes bin_gain_
+        // every hop samples (~11.6 ms). Smoothing the controller→mask
+        // transition kills the frame-rate (~86 Hz) modulation that otherwise
+        // shows up as graininess on kick/bass content.
         bin_gain_.assign(n_freq_, 1.0f);
+        bin_gain_target_.assign(n_freq_, 1.0f);
+        // ~25 ms time constant evaluated per set_params tick (every block_size
+        // samples). alpha = exp(-1 / N_blocks_per_tau).
+        constexpr float kMaskTauSeconds = 0.025f;
+        const float blocks_per_tau =
+            (static_cast<float>(cfg_.sample_rate) * kMaskTauSeconds)
+            / static_cast<float>(cfg_.block_size);
+        mask_smooth_alpha_ = std::exp(-1.0f / std::max(blocks_per_tau, 1.0f));
 
         // Scratch buffers for FFT.
         windowed_.assign(n_fft_, 0.0f);
@@ -120,14 +134,27 @@ public:
             if (g > 1.0f) g = 1.0f;
             band_db[b] = cfg_.min_gain_db + g * gain_span;
         }
-        // bin_db[k] = sum_b band_to_bin_[b, k] * band_db[b] / bin_norm_[k]
+        // bin_db[k] = sum_b band_to_bin_[b, k] * band_db[b] / bin_norm_[k];
+        // store the freshly-computed gain into bin_gain_target_ and let the
+        // smoother in run_frame_-time pull bin_gain_ toward it. (Smoothing in
+        // log/dB then exponentiating would be slightly more perceptual but
+        // the linear-domain pole is cheaper and indistinguishable at these
+        // time constants.)
         for (int k = 0; k < n_freq_; ++k) {
             float sum = 0.0f;
             for (int b = 0; b < n_bands_; ++b) {
                 sum += band_to_bin_[b * n_freq_ + k] * band_db[b];
             }
             const float bin_db = (bin_norm_[k] > 1e-6f) ? (sum / bin_norm_[k]) : 0.0f;
-            bin_gain_[k] = std::pow(10.0f, bin_db / 20.0f);
+            bin_gain_target_[k] = std::pow(10.0f, bin_db / 20.0f);
+        }
+        // Advance the smoother one step (per set_params tick = once per
+        // block_size samples). At a ~25 ms time constant this knocks ~5 dB
+        // off any sudden gain step over the first ~10 ms.
+        const float a = mask_smooth_alpha_;
+        const float ia = 1.0f - a;
+        for (int k = 0; k < n_freq_; ++k) {
+            bin_gain_[k] = a * bin_gain_[k] + ia * bin_gain_target_[k];
         }
     }
 
@@ -282,9 +309,11 @@ private:
     int                out_read_{0};
     int                out_avail_{0};
 
-    std::vector<float> band_to_bin_;  // [n_bands * n_freq]
-    std::vector<float> bin_norm_;     // [n_freq]
-    std::vector<float> bin_gain_;     // [n_freq] linear
+    std::vector<float> band_to_bin_;     // [n_bands * n_freq]
+    std::vector<float> bin_norm_;        // [n_freq]
+    std::vector<float> bin_gain_;        // [n_freq] linear, smoothed (consumed by FFT)
+    std::vector<float> bin_gain_target_; // [n_freq] linear, controller's latest target
+    float              mask_smooth_alpha_{0.f};  // per-set_params decay
 
     // FFT scratch
     std::vector<float> windowed_;
