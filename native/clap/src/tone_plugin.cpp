@@ -282,7 +282,7 @@ struct ModuleState {
     std::unordered_map<std::string, std::size_t>         autoeq_class_index;
     PluginMeta                 sat_meta;
     PluginMeta                 la2a_meta;
-    std::string                bundle_dir;            // .../TONE.clap/Contents
+    std::string                bundle_dir;            // .../NeuralMastering.clap/Contents
     std::string                resources_dir;         // .../Contents/Resources
     std::string                plugin_id_str;         // "com.nablafx.<model_id>"
     clap_plugin_descriptor_t   descriptor{};
@@ -335,7 +335,7 @@ static void populate_descriptor_(ModuleState& st) {
     st.descriptor.manual_url   = "";
     st.descriptor.support_url  = "";
     st.descriptor.version      = "1.0.0";
-    st.descriptor.description  = "Composite TONE mastering plugin";
+    st.descriptor.description  = "NeuralMastering — adaptive mastering chain (auto-EQ + saturator + LA-2A + leveler + ceiling)";
     st.descriptor.features     = st.feature_ptrs.data();
 }
 

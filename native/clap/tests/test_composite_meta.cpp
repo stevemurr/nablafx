@@ -52,7 +52,7 @@ int main(int argc, char** argv) {
                  m.ceiling.attack_ms, m.ceiling.release_ms);
 
     assert(m.schema_version == 1);
-    assert(m.effect_name == "TONE");
+    assert(m.effect_name == "NeuralMastering");
     assert(m.sample_rate == 44100);
     assert(m.sub_bundles.count("auto_eq") && m.sub_bundles.count("saturator")
                                            && m.sub_bundles.count("la2a"));

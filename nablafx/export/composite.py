@@ -1,4 +1,4 @@
-"""Composite TONE plugin export.
+"""Composite NeuralMastering plugin export.
 
 Reads pre-built per-stage bundles (la2a, saturator, and N per-class auto_eq —
 all produced by ``nablafx-export``) and emits a single staging directory ready
@@ -56,14 +56,14 @@ class _AmountMappingAutoEq:
 
 @dataclass(frozen=True)
 class CompositePluginMeta:
-    """Top-level meta for the composite TONE plugin.
+    """Top-level meta for the composite NeuralMastering plugin.
 
     The C++ host reads this once at module load to wire AMT → per-stage params,
     locate sub-bundles, and configure the in-host DSP stages (LUFS leveler,
     true-peak ceiling, output trim).
     """
     schema_version: int = SCHEMA_VERSION
-    effect_name:    str = "TONE"
+    effect_name:    str = "NeuralMastering"
     model_id:       str = ""
     sample_rate:    int = 44100
     channels:       int = 1
@@ -227,7 +227,7 @@ def export_composite_bundle(
     saturator_bundle: Path,
     la2a_bundle: Path,
     out_dir: Path,
-    effect_name: str = "TONE",
+    effect_name: str = "NeuralMastering",
     default_class: str = DEFAULT_ACTIVE_CLASS,
     class_order: Optional[List[str]] = None,
 ) -> CompositePluginMeta:
@@ -328,7 +328,7 @@ def export_composite_bundle(
     # joined per-class model_ids so DAWs reload automation against the exact
     # combination shipped.
     autoeq_id = "_".join(autoeq_metas[c]["model_id"] for c in ordered)
-    model_id = f"tone__{la2a_meta['model_id']}__{sat_meta['model_id']}__{autoeq_id}"
+    model_id = f"nm__{la2a_meta['model_id']}__{sat_meta['model_id']}__{autoeq_id}"
 
     # Copy sub-bundles into the staging dir under their stable role names.
     for role, src in (("saturator", saturator_bundle), ("la2a", la2a_bundle)):

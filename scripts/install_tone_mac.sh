@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Turnkey installer for the composite TONE CLAP plugin on macOS (arm64).
+# Turnkey installer for the composite NeuralMastering CLAP plugin on macOS (arm64).
 #
 # Usage:
 #   scripts/install_tone_mac.sh [--bundle DIR] [--out DIR] [--no-install]
@@ -16,7 +16,7 @@
 #      If none exist, errors with a hint to run scripts/export_tone.py first
 #      (only meaningful on the training host where checkpoints live).
 #   2. Builds the tone_clap dylib via native/clap/build.sh tone, packaging into
-#      $OUT (default: build/TONE.clap).
+#      $OUT (default: build/NeuralMastering.clap).
 #   3. Unless --no-install is passed, copies the .clap bundle to
 #      ~/Library/Audio/Plug-Ins/CLAP/ so DAWs can pick it up.
 #
@@ -33,7 +33,7 @@ usage: $(basename "$0") [--bundle <staging_dir>] [--out <out.clap>] [--no-instal
 
   --bundle DIR    Composite staging dir (default: ./build/tone-staging or
                   ./artifacts/tone-bundle, whichever exists).
-  --out PATH      Output .clap bundle path (default: ./build/TONE.clap).
+  --out PATH      Output .clap bundle path (default: ./build/NeuralMastering.clap).
   --no-install    Build only; don't copy to ~/Library/Audio/Plug-Ins/CLAP/.
 EOF
     exit 2
@@ -46,7 +46,7 @@ fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUNDLE=""
-OUT="$REPO_ROOT/build/TONE.clap"
+OUT="$REPO_ROOT/build/NeuralMastering.clap"
 DO_INSTALL=1
 
 while [ $# -gt 0 ]; do
@@ -92,7 +92,7 @@ if [ ! -f "$BUNDLE/tone_meta.json" ]; then
     exit 1
 fi
 
-echo "[install_tone_mac] building TONE.clap"
+echo "[install_tone_mac] building NeuralMastering.clap"
 echo "  staging: $BUNDLE"
 echo "  out:     $OUT"
 
@@ -106,7 +106,7 @@ if [ "$DO_INSTALL" -eq 1 ]; then
     cp -R "$OUT" "$INSTALLED"
     echo "[install_tone_mac] installed to $INSTALLED"
     echo
-    echo "Done. Restart your DAW (or rescan plug-ins) and look for TONE."
+    echo "Done. Restart your DAW (or rescan plug-ins) and look for NeuralMastering."
 else
     echo "[install_tone_mac] build complete (skipped install per --no-install)"
 fi

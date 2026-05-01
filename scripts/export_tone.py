@@ -1,4 +1,4 @@
-"""Build the composite TONE staging bundle.
+"""Build the composite NeuralMastering staging bundle.
 
 Three modes:
 
@@ -268,7 +268,7 @@ def _add_class_run_args(parser: argparse.ArgumentParser, kind: str) -> None:
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
     """Args available on every subparser AND the top-level parser, so callers
     can put them before or after the subcommand without surprise."""
-    parser.add_argument("--effect-name", default="TONE")
+    parser.add_argument("--effect-name", default="NeuralMastering")
     parser.add_argument("--default-class", default=DEFAULT_ACTIVE_CLASS,
                         help=f"Class loaded by default in the plugin "
                              f"(one of {','.join(DEFAULT_CLASS_ORDER)}).")
@@ -276,7 +276,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="export_tone",
-                                description="Build composite TONE staging bundle.")
+                                description="Build composite NeuralMastering staging bundle.")
     _add_common_args(p)
     sp = p.add_subparsers(dest="cmd", required=True)
 

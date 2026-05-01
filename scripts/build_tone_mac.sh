@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# Mac one-shot: bundles the in-repo TONE artifacts (artifacts/tone-bundles/*)
-# into a composite TONE.clap and (optionally) installs it into the system
-# CLAP plugin directory.
+# Mac one-shot: bundles the in-repo NeuralMastering artifacts
+# (artifacts/tone-bundles/*) into NeuralMastering.clap and (optionally)
+# installs it into the system CLAP plugin directory.
 #
 # Usage:
-#   bash scripts/build_tone_mac.sh                 # writes ./build/TONE.clap
+#   bash scripts/build_tone_mac.sh                 # writes ./build/NeuralMastering.clap
 #   bash scripts/build_tone_mac.sh install         # also copies to ~/Library/Audio/Plug-Ins/CLAP/
 #   bash scripts/build_tone_mac.sh <out.clap>      # write to a custom path
 #
@@ -31,8 +31,8 @@ fi
 INSTALL=0
 OUT=""
 case "${1:-}" in
-    "")        OUT="$REPO/build/TONE.clap" ;;
-    install)   OUT="$REPO/build/TONE.clap"; INSTALL=1 ;;
+    "")        OUT="$REPO/build/NeuralMastering.clap" ;;
+    install)   OUT="$REPO/build/NeuralMastering.clap"; INSTALL=1 ;;
     *)         OUT="$1" ;;
 esac
 
@@ -77,7 +77,7 @@ meta = export_composite_bundle(
     saturator_bundle = bundles / "saturator",
     la2a_bundle      = bundles / "la2a",
     out_dir          = out_dir,
-    effect_name      = "TONE",
+    effect_name      = "NeuralMastering",
 )
 print(f"staged composite bundle at {out_dir}")
 print(f"  effect_name: {meta.effect_name}")
