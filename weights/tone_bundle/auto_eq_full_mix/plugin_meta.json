@@ -1,6 +1,6 @@
 {
-  "effect_name": "outputs_parametriceq_2026-04-28-13-35-26",
-  "model_id": "outputs_parametriceq_2026-04-28-13-35-26",
+  "effect_name": "outputs_parametriceq_2026-04-30-15-55-40",
+  "model_id": "outputs_parametriceq_2026-04-30-15-55-40",
   "architecture": "lstm",
   "sample_rate": 44100,
   "channels": 1,
@@ -14,18 +14,18 @@
     {
       "name": "root_h",
       "shape": [
+        2,
         1,
-        1,
-        15
+        64
       ],
       "dtype": "float32"
     },
     {
       "name": "root_c",
       "shape": [
+        2,
         1,
-        1,
-        15
+        64
       ],
       "dtype": "float32"
     }
