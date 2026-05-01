@@ -95,10 +95,11 @@ enum class StageID : int {
 // ---------------------------------------------------------------------------
 
 struct SpectrumAnalyzer {
-    static constexpr int   kFFT   = 2048;   // accumulation window
-    static constexpr int   kDisp  = 128;    // log-spaced display bins
-    static constexpr float kAlpha = 0.65f;  // EMA coefficient (~110 ms at ~21 fps)
-    static constexpr float kFlo   = 20.f;
+    static constexpr int   kFFT     = 2048;   // accumulation window
+    static constexpr int   kDisp    = 128;    // log-spaced display bins
+    static constexpr int   kNumBins = 50;     // eq_bins resolution (log-spaced 20–20k Hz)
+    static constexpr float kAlpha   = 0.65f;  // EMA coefficient (~110 ms at ~21 fps)
+    static constexpr float kFlo     = 20.f;
     static constexpr float kFhi   = 20000.f;
 
     // Audio thread: one mono accumulator per chain position.
@@ -112,7 +113,9 @@ struct SpectrumAnalyzer {
     std::mutex  xfer_mtx;
     bool        xfer_ready{false};
     std::array<std::array<float, kFFT>, kNumStages> xfer_frames{};
-    std::array<float, 5> xfer_eq_gains_snap{};
+    std::array<float, 5>        xfer_eq_gains_snap{};
+    std::array<float, kNumBins> xfer_eq_bins_snap{};
+    bool                        xfer_has_bins_snap{false};
 
     // Main-thread state.
     std::array<float, kFFT>  hann{};
@@ -122,10 +125,14 @@ struct SpectrumAnalyzer {
     // EMA magnitude [chain_pos][disp_bin], linear.
     std::array<std::array<float, kDisp>, kNumStages> ema{};
 
-    // Last EQ band gains (dB) as applied by the LSTM — 5 bands.
-    // Written from the audio thread under xfer_mtx, read by the main thread.
-    std::array<float, 5> xfer_eq_gains{};
-    std::array<float, 5> mt_eq_gains{};
+    // Last EQ band gains (dB) and optional 50-point bin gains from the LSTM.
+    // Written from the audio thread, snapped under xfer_mtx, read by main thread.
+    std::array<float, 5>        xfer_eq_gains{};
+    std::array<float, kNumBins> xfer_eq_bins{};
+    bool                        xfer_has_bins{false};
+    std::array<float, 5>        mt_eq_gains{};
+    std::array<float, kNumBins> mt_eq_bins{};
+    bool                        mt_has_bins{false};
 
     // Staging for JSON build (main thread only).
     std::array<std::array<float, kFFT>, kNumStages> mt_frames{};
@@ -156,6 +163,12 @@ struct SpectrumAnalyzer {
     void set_eq_gains(const float* gains_db_5) {
         std::copy_n(gains_db_5, 5, xfer_eq_gains.data());
     }
+    // Audio thread: latch 50-point bin gains (dB) for SpectralMask view.
+    void set_eq_bins(const float* gains_db) {
+        std::copy_n(gains_db, kNumBins, xfer_eq_bins.data());
+        xfer_has_bins = true;
+    }
+    void clear_eq_bins() { xfer_has_bins = false; }
 
     // Audio thread: when all accumulators are full, try to hand off to main thread.
     // Returns true when a transfer was attempted (whether or not the lock was acquired).
@@ -163,7 +176,9 @@ struct SpectrumAnalyzer {
         if (accum[0].fill < kFFT) return false;
         if (xfer_mtx.try_lock()) {
             for (int p = 0; p < kNumStages; ++p) xfer_frames[p] = accum[p].buf;
-            xfer_eq_gains_snap = xfer_eq_gains;
+            xfer_eq_gains_snap   = xfer_eq_gains;
+            xfer_eq_bins_snap    = xfer_eq_bins;
+            xfer_has_bins_snap   = xfer_has_bins;
             xfer_ready = true;
             xfer_mtx.unlock();
         }
@@ -176,9 +191,11 @@ struct SpectrumAnalyzer {
         {
             std::lock_guard<std::mutex> lk(xfer_mtx);
             if (!xfer_ready) return false;
-            mt_frames   = xfer_frames;
-            mt_eq_gains = xfer_eq_gains_snap;
-            xfer_ready  = false;
+            mt_frames     = xfer_frames;
+            mt_eq_gains   = xfer_eq_gains_snap;
+            mt_eq_bins    = xfer_eq_bins_snap;
+            mt_has_bins   = xfer_has_bins_snap;
+            xfer_ready    = false;
         }
         const float sr = static_cast<float>(sample_rate);
         for (int pos = 0; pos < kNumStages; ++pos) {
@@ -212,14 +229,27 @@ struct SpectrumAnalyzer {
             }
             s += ']';
         }
-        // 5 LSTM EQ band gains in dB so JS can draw the actual filter response.
+        // 5 LSTM EQ band gains in dB so JS can draw the filter response curve.
         s += "],\"eq\":[";
         for (int b = 0; b < 5; ++b) {
             if (b) s += ',';
             snprintf(buf, sizeof(buf), "%.2f", mt_eq_gains[b]);
             s += buf;
         }
-        s += "]});";
+        // 50-point bin gains (SpectralMask only) or null (PEQ classes).
+        s += "],\"eq_bins\":";
+        if (mt_has_bins) {
+            s += '[';
+            for (int b = 0; b < kNumBins; ++b) {
+                if (b) s += ',';
+                snprintf(buf, sizeof(buf), "%.2f", mt_eq_bins[b]);
+                s += buf;
+            }
+            s += ']';
+        } else {
+            s += "null";
+        }
+        s += "});";
         return s;
     }
 
@@ -1067,8 +1097,24 @@ void flush_chain_block_(Plugin& plug,
                     dsp->set_params(eq_params, n_params);
                     dsp->process(blk, wet_a.data(), kBlockSize);
                     if (ch == 0) {
-                        float gains[5] = {};
-                        plug.spectrum.set_eq_gains(gains);
+                        // 5-point curve display (matches PEQ band centres).
+                        static constexpr float kDisplayHz[5] =
+                            {1010.f, 110.f, 1100.f, 7000.f, 10000.f};
+                        float gains5[5];
+                        dsp->sample_gains_db(kDisplayHz, gains5, 5);
+                        plug.spectrum.set_eq_gains(gains5);
+                        // 50-point bin display (log-spaced 20–20k Hz).
+                        static const std::array<float, SpectrumAnalyzer::kNumBins> kBinHz = []() {
+                            std::array<float, SpectrumAnalyzer::kNumBins> hz;
+                            for (int i = 0; i < SpectrumAnalyzer::kNumBins; ++i)
+                                hz[i] = 20.f * std::pow(1000.f,
+                                    float(i) / (SpectrumAnalyzer::kNumBins - 1));
+                            return hz;
+                        }();
+                        float gains50[SpectrumAnalyzer::kNumBins];
+                        dsp->sample_gains_db(kBinHz.data(), gains50,
+                                             SpectrumAnalyzer::kNumBins);
+                        plug.spectrum.set_eq_bins(gains50);
                     }
                 } else {
                     // PEQ: speed-smooth then range-scale, then manual offsets.
@@ -1091,6 +1137,7 @@ void flush_chain_block_(Plugin& plug,
                         for (int b = 0; b < 5; ++b)
                             gains[b] = kGainMin + final_params[kGainCh[b]] * kGainSpan;
                         plug.spectrum.set_eq_gains(gains);
+                        plug.spectrum.clear_eq_bins();
                     }
                 }
                 blend_(blk, dry.data(), wet_a.data(), amt.autoeq_wet_mix, kBlockSize);

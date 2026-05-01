@@ -72,13 +72,13 @@ public:
         }
 
         in_ring_.assign(n_fft_, 0.0f);
-        out_ring_.assign(n_fft_ + hop_, 0.0f);  // OLA tail
+        out_ring_.assign(n_fft_ + hop_, 0.0f);
+        norm_ring_.assign(n_fft_ + hop_, 0.0f);  // OLA window² accumulator
         in_fill_         = 0;
         samples_since_   = 0;
+        out_write_       = 0;
+        out_read_        = 0;
         out_avail_       = 0;
-        // Latency: the very first frame won't fire until we've accumulated
-        // n_fft samples; output trails analysis. Pre-fill out ring with zeros
-        // so process() can hand back silence for the latency window.
 
         // Mel filterbank.
         build_mel_(cfg_.sample_rate, n_fft_, n_bands_, cfg_.f_min, cfg_.f_max);
@@ -92,12 +92,13 @@ public:
         split_imag_.assign(n_fft_ / 2, 0.0f);
         time_out_.assign(n_fft_, 0.0f);
 
-        // OLA normalization: with Hann² overlap at hop=n_fft/2, the COLA sum
-        // is constant 0.5*n_fft. Scale output by 1/(0.5*n_fft) and an extra
-        // 1/n_fft from the inverse FFT scaling vDSP convention to land at
-        // unity gain. Combined: 2/(n_fft*n_fft) -> handled at OLA write.
-        ola_scale_ = 2.0f / static_cast<float>(n_fft_) /
-                     static_cast<float>(n_fft_);
+        // vDSP forward+inverse round-trip scale is 2*n_fft (Apple vDSP guide:
+        // "divide by 2n to recover original values after inverse"). We apply
+        // 1/(2*n_fft) in the OLA write and then divide per-sample by the
+        // accumulated sum of window² — matching torch.istft's normalization —
+        // so output is correctly scaled regardless of the COLA sum varying
+        // between 0.5 and 1.0 over the hop cycle.
+        ola_scale_ = 1.0f / (2.0f * static_cast<float>(n_fft_));
     }
 
     // Apply latest controller output: ``params`` holds n_bands sigmoid values
@@ -144,15 +145,32 @@ public:
                 run_frame_();
             }
 
-            // Hand back one sample of OLA output if available; else silence.
+            // Hand back one sample. Divide by accumulated window² to match
+            // torch.istft per-sample normalisation; guards against near-zero
+            // norm at Hann window edges.
             if (out_avail_ > 0) {
-                out[i] = out_ring_[out_read_];
-                out_ring_[out_read_] = 0.0f;  // consume
-                out_read_ = (out_read_ + 1) % static_cast<int>(out_ring_.size());
+                const int   rd   = out_read_;
+                const float norm = norm_ring_[rd];
+                out[i] = (norm > 1e-8f) ? (out_ring_[rd] / norm) : 0.0f;
+                out_ring_[rd]  = 0.0f;
+                norm_ring_[rd] = 0.0f;
+                out_read_ = (rd + 1) % static_cast<int>(out_ring_.size());
                 --out_avail_;
             } else {
                 out[i] = 0.0f;
             }
+        }
+    }
+
+    // Sample the current per-bin gain mask at n arbitrary frequencies (Hz)
+    // and return linear→dB values. Used to populate the 5-band display.
+    void sample_gains_db(const float* hz_arr, float* db_arr, int n) const {
+        for (int i = 0; i < n; ++i) {
+            int bin = static_cast<int>(
+                std::round(hz_arr[i] * n_fft_ / static_cast<float>(cfg_.sample_rate)));
+            bin = std::max(0, std::min(bin, n_freq_ - 1));
+            const float g = bin_gain_[bin];
+            db_arr[i] = (g > 1e-8f) ? 20.0f * std::log10(g) : -80.0f;
         }
     }
 
@@ -197,15 +215,16 @@ private:
                   reinterpret_cast<DSPComplex*>(time_out_.data()), 2,
                   n_fft_ / 2);
 
-        // Window the output again (Hann²-OLA), accumulate into out_ring_, then
-        // mark `hop` more samples as available.
+        // Hann²-OLA: accumulate audio (scaled by 1/(2N)) and window² into
+        // parallel rings. Per-sample division in process() normalises away the
+        // varying Hann² COLA sum (0.5–1.0 for hop=N/2), mirroring torch.istft.
+        const int ring_sz = static_cast<int>(out_ring_.size());
         for (int n = 0; n < n_fft_; ++n) {
-            const float v = time_out_[n] * window_[n] * ola_scale_;
-            const int idx = (out_write_ + n) % static_cast<int>(out_ring_.size());
-            out_ring_[idx] += v;
+            const int idx = (out_write_ + n) % ring_sz;
+            out_ring_[idx]  += time_out_[n] * window_[n] * ola_scale_;
+            norm_ring_[idx] += window_[n] * window_[n];
         }
-        // Advance write head and report `hop` new samples available.
-        out_write_ = (out_write_ + hop_) % static_cast<int>(out_ring_.size());
+        out_write_ = (out_write_ + hop_) % ring_sz;
         out_avail_ += hop_;
     }
 
@@ -257,7 +276,8 @@ private:
     int                in_fill_{0};
     int                samples_since_{0};
 
-    std::vector<float> out_ring_;     // OLA accumulator (n_fft + hop)
+    std::vector<float> out_ring_;     // OLA audio accumulator (n_fft + hop)
+    std::vector<float> norm_ring_;   // OLA window² accumulator (same size)
     int                out_write_{0};
     int                out_read_{0};
     int                out_avail_{0};

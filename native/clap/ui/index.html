@@ -222,6 +222,30 @@
     width: 676px;
     height: 98px;
   }
+  #eq-view-toggle {
+    position: absolute;
+    top: 8px;
+    right: 14px;
+    display: none;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 10px;
+    padding: 0;
+    cursor: pointer;
+    font: 8px/1 -apple-system, sans-serif;
+    letter-spacing: 0.08em;
+    color: #555;
+    overflow: hidden;
+  }
+  #eq-view-toggle span {
+    display: inline-block;
+    padding: 3px 8px;
+    transition: background 0.15s, color 0.15s;
+  }
+  #eq-view-toggle span.active {
+    background: #2a2a2a;
+    color: #ccc;
+  }
 
   /* ── Enum picker (e.g. AUTO EQ class) ────────────────────── */
   .enum-wrap {
@@ -288,6 +312,9 @@
   <div id="chain"></div>
   <div id="spectrum-view">
     <canvas id="spectrum-canvas" width="676" height="98"></canvas>
+    <button id="eq-view-toggle" title="Toggle EQ view">
+      <span id="eq-view-curve" class="active">CURVE</span><span id="eq-view-bins">BINS</span>
+    </button>
   </div>
   <div id="surface">
     <div id="surface-title">SELECT A PROCESSOR</div>
@@ -764,6 +791,23 @@ window.toneInit = function(state) {
   const dispFreqs = Array.from({length: KDISP}, (_, i) =>
     FLO * Math.pow(FHI / FLO, i / (KDISP - 1)));
 
+  // 50-point bin display frequencies — must match kNumBins in C++ (log 20–20k).
+  const N_BINS = 50;
+  const binFreqs = Array.from({length: N_BINS}, (_, i) =>
+    20 * Math.pow(1000, i / (N_BINS - 1)));
+
+  // EQ view mode: 'curve' (biquad approximation) or 'bins' (actual SpectralMask bins).
+  let eqViewMode = 'curve';
+
+  const toggleBtn  = document.getElementById('eq-view-toggle');
+  const curveLabel = document.getElementById('eq-view-curve');
+  const binsLabel  = document.getElementById('eq-view-bins');
+  toggleBtn.addEventListener('click', () => {
+    eqViewMode = eqViewMode === 'curve' ? 'bins' : 'curve';
+    curveLabel.classList.toggle('active', eqViewMode === 'curve');
+    binsLabel.classList.toggle('active',  eqViewMode === 'bins');
+  });
+
   // One color per StageID.
   const STAGE_COLORS = [
     '#4cc9a8',  // 0 InputLeveler
@@ -866,10 +910,64 @@ window.toneInit = function(state) {
       ctx.restore();
     }
 
+    // Show/hide the CURVE/BINS toggle based on whether bins data is available.
+    toggleBtn.style.display = data.eq_bins ? 'block' : 'none';
+
+    if (!data.eq && !data.eq_bins) return;
+
+    if (eqViewMode === 'bins' && data.eq_bins) {
+      // ── BINS mode: 50-point log-spaced mask response ─────────────
+      const bxs = binFreqs.map(f => freqToX(f, W));
+      const bys = data.eq_bins.map(db => deltaToY(db));
+
+      function buildBinsPath() {
+        ctx.beginPath();
+        ctx.moveTo(bxs[0], CY);
+        for (let i = 0; i < N_BINS; i++) ctx.lineTo(bxs[i], bys[i]);
+        ctx.lineTo(bxs[N_BINS - 1], CY);
+        ctx.closePath();
+      }
+
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, 0, W, CY); ctx.clip();
+      buildBinsPath();
+      ctx.fillStyle = 'rgba(76, 201, 168, 0.78)';
+      ctx.fill();
+      ctx.restore();
+
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, CY, W, H - CY); ctx.clip();
+      buildBinsPath();
+      ctx.fillStyle = 'rgba(231, 111, 81, 0.72)';
+      ctx.fill();
+      ctx.restore();
+
+      drawCenterLine(0.9);
+
+      ctx.save();
+      ctx.shadowBlur  = 8;
+      ctx.shadowColor = STAGE_COLORS[1];
+      ctx.strokeStyle = STAGE_COLORS[1];
+      ctx.lineWidth   = 2;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      for (let i = 0; i < N_BINS; i++)
+        i === 0 ? ctx.moveTo(bxs[i], bys[i]) : ctx.lineTo(bxs[i], bys[i]);
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.setLineDash([]);
+      ctx.font = '7px -apple-system, sans-serif';
+      ctx.textAlign = 'right';
+      const lxb = W - 4;
+      ctx.fillStyle = 'rgba(76, 201, 168, 0.90)'; ctx.fillText('▲ BOOST', lxb,  9);
+      ctx.fillStyle = 'rgba(231, 111, 81, 0.90)'; ctx.fillText('▼ CUT',   lxb, 19);
+      return;
+    }
+
     if (!data.eq) return;
 
-    // Compute EQ filter frequency response from the 5 LSTM band gains.
-    // Bands: low_shelf@1010Hz, peaking@110Hz, peaking@1100Hz, peaking@7kHz, high_shelf@10kHz
+    // ── CURVE mode: biquad approximation from 5 band gains ──────
     const SR = 44100;
     const EQ_BANDS = [
       { kind: 'low_shelf',  fc: 1010,  q: 0.707 },
@@ -879,7 +977,6 @@ window.toneInit = function(state) {
       { kind: 'high_shelf', fc: 10000, q: 0.707 },
     ];
 
-    // Evaluate biquad frequency response at freq f (Hz) given coeffs b0,b1,b2,a1,a2.
     function biquadResponse(f, b0, b1, b2, a1, a2) {
       const w = 2 * Math.PI * f / SR;
       const cosw = Math.cos(w), sinw = Math.sin(w);
@@ -892,7 +989,6 @@ window.toneInit = function(state) {
       return 10 * Math.log10(Math.max(mag2, 1e-20));
     }
 
-    // RBJ cookbook biquad coefficients for each band type.
     function bandCoeffs(band, gain_db) {
       const A  = Math.pow(10, gain_db / 40);
       const w0 = 2 * Math.PI * band.fc / SR;
@@ -907,7 +1003,7 @@ window.toneInit = function(state) {
         const b0 =  A*((A+1)-(A-1)*cw+sq),  b1 =  2*A*((A-1)-(A+1)*cw),   b2 = A*((A+1)-(A-1)*cw-sq);
         const a0 =     (A+1)+(A-1)*cw+sq,    a1 =   -2*((A-1)+(A+1)*cw),   a2 =   (A+1)+(A-1)*cw-sq;
         return [b0/a0, b1/a0, b2/a0, a1/a0, a2/a0];
-      } else { // high_shelf
+      } else {
         const sq = 2*Math.sqrt(A)*alpha;
         const b0 =  A*((A+1)+(A-1)*cw+sq),  b1 = -2*A*((A-1)+(A+1)*cw),   b2 = A*((A+1)+(A-1)*cw-sq);
         const a0 =     (A+1)-(A-1)*cw+sq,    a1 =    2*((A-1)-(A+1)*cw),   a2 =   (A+1)-(A-1)*cw-sq;
@@ -915,7 +1011,6 @@ window.toneInit = function(state) {
       }
     }
 
-    // Sum filter response (dB) across all 5 bands at each display frequency.
     const eqGains = data.eq || [0,0,0,0,0];
     const xs     = dispFreqs.map(f => freqToX(f, W));
     const yDelta = dispFreqs.map(f => {
@@ -927,7 +1022,6 @@ window.toneInit = function(state) {
       return deltaToY(totalDb);
     });
 
-    // Closed polygon from center line → EQ curve → back to center.
     function buildDeltaPath() {
       ctx.beginPath();
       ctx.moveTo(xs[0], CY);
@@ -936,7 +1030,6 @@ window.toneInit = function(state) {
       ctx.closePath();
     }
 
-    // ── Boost fill: clip to top half, teal ──────────────────────
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, W, CY); ctx.clip();
     buildDeltaPath();
@@ -944,7 +1037,6 @@ window.toneInit = function(state) {
     ctx.fill();
     ctx.restore();
 
-    // ── Cut fill: clip to bottom half, orange ───────────────────
     ctx.save();
     ctx.beginPath(); ctx.rect(0, CY, W, H - CY); ctx.clip();
     buildDeltaPath();
@@ -952,10 +1044,8 @@ window.toneInit = function(state) {
     ctx.fill();
     ctx.restore();
 
-    // ── Center line on top of fills ─────────────────────────────
     drawCenterLine(0.9);
 
-    // ── EQ delta curve with glow ────────────────────────────────
     ctx.save();
     ctx.shadowBlur  = 8;
     ctx.shadowColor = STAGE_COLORS[1];
@@ -968,7 +1058,6 @@ window.toneInit = function(state) {
     ctx.stroke();
     ctx.restore();
 
-    // ── Legend ───────────────────────────────────────────────────
     ctx.setLineDash([]);
     ctx.font = '7px -apple-system, sans-serif';
     ctx.textAlign = 'right';
@@ -976,7 +1065,6 @@ window.toneInit = function(state) {
     ctx.fillStyle = 'rgba(76, 201, 168, 0.90)'; ctx.fillText('▲ BOOST', lx,  9);
     ctx.fillStyle = 'rgba(231, 111, 81, 0.90)'; ctx.fillText('▼ CUT',   lx, 19);
 
-    // ── Diagnostic: show raw band gains so we can see LSTM output ─
     const bandNames = ['LS', '110', '1k', '7k', 'HS'];
     ctx.font = '8px monospace';
     ctx.textAlign = 'left';
