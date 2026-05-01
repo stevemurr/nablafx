@@ -1,6 +1,6 @@
 {
-  "effect_name": "outputs_parametriceq_2026-04-30-15-55-40",
-  "model_id": "outputs_parametriceq_2026-04-30-15-55-40",
+  "effect_name": "outputs_spectralmaskeq_2026-04-30-18-36-30",
+  "model_id": "outputs_spectralmaskeq_2026-04-30-18-36-30",
   "architecture": "lstm",
   "sample_rate": 44100,
   "channels": 1,
@@ -42,99 +42,19 @@
   ],
   "dsp_blocks": [
     {
-      "kind": "parametric_eq_5band",
+      "kind": "spectral_mask_eq",
       "name": "processor.processors.0",
       "params": {
         "sample_rate": 44100,
         "block_size": 128,
-        "num_control_params": 15,
-        "bands": [
-          {
-            "name": "low_shelf",
-            "kind": "low_shelf",
-            "cutoff_freq": 1010.0,
-            "gain_db_range": [
-              -9.0,
-              9.0
-            ],
-            "q_range": [
-              0.5,
-              2.0
-            ],
-            "param_channels": {
-              "gain": 0,
-              "q": 2
-            }
-          },
-          {
-            "name": "band0",
-            "kind": "peaking",
-            "cutoff_freq": 110.0,
-            "gain_db_range": [
-              -9.0,
-              9.0
-            ],
-            "q_range": [
-              0.5,
-              2.0
-            ],
-            "param_channels": {
-              "gain": 3,
-              "q": 5
-            }
-          },
-          {
-            "name": "band1",
-            "kind": "peaking",
-            "cutoff_freq": 1100.0,
-            "gain_db_range": [
-              -9.0,
-              9.0
-            ],
-            "q_range": [
-              0.5,
-              2.0
-            ],
-            "param_channels": {
-              "gain": 6,
-              "q": 8
-            }
-          },
-          {
-            "name": "band2",
-            "kind": "peaking",
-            "cutoff_freq": 7000.0,
-            "gain_db_range": [
-              -9.0,
-              9.0
-            ],
-            "q_range": [
-              0.5,
-              2.0
-            ],
-            "param_channels": {
-              "gain": 9,
-              "q": 11
-            }
-          },
-          {
-            "name": "high_shelf",
-            "kind": "high_shelf",
-            "cutoff_freq": 10000.0,
-            "gain_db_range": [
-              -9.0,
-              9.0
-            ],
-            "q_range": [
-              0.5,
-              2.0
-            ],
-            "param_channels": {
-              "gain": 12,
-              "q": 14
-            }
-          }
-        ]
+        "num_control_params": 32,
+        "n_fft": 1024,
+        "hop": 512,
+        "n_bands": 32,
+        "min_gain_db": -18.0,
+        "max_gain_db": 18.0,
+        "f_min": 30.0,
+        "f_max": 22050.0
       }
     }
   ],

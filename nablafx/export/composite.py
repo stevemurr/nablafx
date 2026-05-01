@@ -261,22 +261,44 @@ def export_composite_bundle(
     out_dir = Path(out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Validate every auto-EQ sub-bundle and confirm they share PEQ geometry.
+    # Validate every auto-EQ sub-bundle. Mixed kinds across classes are allowed
+    # — the runtime dispatches per class based on dsp_blocks[0].kind. Within a
+    # given kind we still confirm geometry homogeneity so the runtime can
+    # dispatch without per-class layout assertions.
     autoeq_metas: Dict[str, Dict[str, Any]] = {}
-    canonical_sig = None
-    canonical_class = None
+    canonical_sig_by_kind: Dict[str, Tuple] = {}
+    canonical_cls_by_kind: Dict[str, str] = {}
     for cls, p in auto_eq_paths.items():
-        m = _check_sub_bundle(p, expected_kind="nn+dsp",
-                              expected_block_kind="parametric_eq_5band")
-        sig = _peq_layout_signature(m)
-        if canonical_sig is None:
-            canonical_sig = sig
-            canonical_class = cls
-        elif sig != canonical_sig:
+        m = _check_sub_bundle(p, expected_kind="nn+dsp")
+        blocks = m.get("dsp_blocks") or []
+        if not blocks:
+            raise ValueError(f"{p}: no dsp_blocks in auto_eq sub-bundle meta")
+        kind = blocks[0].get("kind")
+        if kind not in ("parametric_eq_5band", "spectral_mask_eq"):
             raise ValueError(
-                f"auto_eq class {cls!r} PEQ layout differs from {canonical_class!r}; "
-                "all classes must share frozen freqs and identical band ranges. "
-                "Re-train the divergent class with the same model config."
+                f"{p}: auto_eq dsp_blocks[0].kind={kind!r} is not supported "
+                "(expected parametric_eq_5band or spectral_mask_eq)"
+            )
+        if kind == "parametric_eq_5band":
+            sig = _peq_layout_signature(m)
+        else:
+            # Spectral mask: hash the geometry so all spectral classes agree.
+            p_ = blocks[0].get("params", {})
+            sig = (
+                p_.get("sample_rate"), p_.get("block_size"),
+                p_.get("num_control_params"), p_.get("n_fft"),
+                p_.get("hop"), p_.get("n_bands"),
+                p_.get("min_gain_db"), p_.get("max_gain_db"),
+                p_.get("f_min"), p_.get("f_max"),
+            )
+        if kind not in canonical_sig_by_kind:
+            canonical_sig_by_kind[kind] = sig
+            canonical_cls_by_kind[kind] = cls
+        elif sig != canonical_sig_by_kind[kind]:
+            raise ValueError(
+                f"auto_eq class {cls!r} ({kind}) layout differs from "
+                f"{canonical_cls_by_kind[kind]!r}; classes sharing a kind "
+                "must share geometry."
             )
         autoeq_metas[cls] = m
 

@@ -127,9 +127,37 @@ def _extract_parametric_eq(processor: torch.nn.Module, qname: str) -> DspBlockSp
     )
 
 
+def _extract_spectral_mask_eq(processor: torch.nn.Module, qname: str) -> DspBlockSpec:
+    """Serialize a SpectralMaskEQ's mel band layout and FFT geometry.
+
+    The controller emits a sigmoid in [0, 1] for each of the ``n_bands``
+    control values. The C++ runtime computes the same mel band edges from
+    (sample_rate, n_fft, n_bands, f_min, f_max) so we don't need to ship the
+    matrix explicitly — only the geometry parameters.
+    """
+    return DspBlockSpec(
+        kind="spectral_mask_eq",
+        name=qname,
+        params={
+            "sample_rate": int(processor.sample_rate),
+            "block_size": int(processor.block_size),
+            "num_control_params": int(processor.num_control_params),
+            "n_fft": int(processor.n_fft),
+            "hop": int(processor.hop),
+            "n_bands": int(processor.n_bands),
+            "min_gain_db": float(processor.min_gain_db),
+            "max_gain_db": float(processor.max_gain_db),
+            "f_min": 30.0,  # matches SpectralMaskEQ default; surface if we
+                            # ever vary it
+            "f_max": float(processor.sample_rate) / 2.0,
+        },
+    )
+
+
 _EXTRACTORS = {
     "StaticRationalNonlinearity": _extract_rational_a,
     "ParametricEQ": _extract_parametric_eq,
+    "SpectralMaskEQ": _extract_spectral_mask_eq,
 }
 
 

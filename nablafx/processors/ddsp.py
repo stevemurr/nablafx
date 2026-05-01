@@ -414,6 +414,168 @@ class ParametricEQ(torch.nn.Module):
 
 
 # -----------------------------------------------------------------------------
+# Spectral Mask EQ
+# -----------------------------------------------------------------------------
+
+
+class SpectralMaskEQ(torch.nn.Module):
+    """STFT-domain magnitude-mask EQ with N mel-spaced bands.
+
+    The controller emits ``num_bands`` sigmoid values per block. Those are
+    de-normalized to per-band gain (dB), interpolated/expanded to a per-FFT-bin
+    gain mask, and applied to the magnitude spectrum (phase preserved). iSTFT
+    with overlap-add reconstructs the audio. Differentiable via torch.stft /
+    torch.istft.
+
+    Designed to mirror the C++ ``spectral_mask_eq.hpp`` runtime: same n_fft,
+    hop, mel band edges, and zero-phase magnitude-only application. The C++
+    runtime computes its mel matrix the same way (HTK formula) so the trained
+    weights are directly usable.
+    """
+
+    def __init__(
+        self,
+        sample_rate: float,
+        n_bands: int = 32,
+        n_fft: int = 1024,
+        hop: int = 512,
+        min_gain_db: float = -18.0,
+        max_gain_db: float = 18.0,
+        block_size: int = 128,
+        control_type: str = "dynamic-spectral",
+        lr_multiplier: float = 1.0,
+        f_min: float = 30.0,
+        f_max: float | None = None,
+    ):
+        super().__init__()
+        assert control_type in ["dynamic", "dynamic-spectral", "dynamic-cond"]
+        self.sample_rate = sample_rate
+        self.n_bands = n_bands
+        self.n_fft = n_fft
+        self.hop = hop
+        self.min_gain_db = min_gain_db
+        self.max_gain_db = max_gain_db
+        self.block_size = block_size
+        self.control_type = control_type
+        self.lr_multiplier = lr_multiplier
+        self.num_control_params = n_bands
+
+        # Mel filterbank: each row picks/weights linear FFT bins for one band.
+        n_freq = n_fft // 2 + 1
+        if f_max is None:
+            f_max = sample_rate / 2.0
+        mel_min = 2595.0 * float(torch.log10(torch.tensor(1.0 + f_min / 700.0)))
+        mel_max = 2595.0 * float(torch.log10(torch.tensor(1.0 + f_max / 700.0)))
+        mel_pts = torch.linspace(mel_min, mel_max, n_bands + 2)
+        hz_pts = 700.0 * (10.0 ** (mel_pts / 2595.0) - 1.0)
+        bin_pts = (hz_pts * (n_fft / sample_rate)).clamp(0, n_freq - 1)
+        # band_to_bin: triangular weighting matrix [n_bands, n_freq]
+        band_to_bin = torch.zeros(n_bands, n_freq)
+        idx = torch.arange(n_freq, dtype=torch.float32)
+        for b in range(n_bands):
+            left, center, right = bin_pts[b], bin_pts[b + 1], bin_pts[b + 2]
+            up = (idx - left) / torch.clamp(center - left, min=1e-6)
+            dn = (right - idx) / torch.clamp(right - center, min=1e-6)
+            band_to_bin[b] = torch.clamp(torch.minimum(up, dn), min=0.0)
+        # bin_to_band: maps per-bin gain back to per-band query — but we need the
+        # opposite direction (per-band -> per-bin). Build that via row-normalized
+        # transpose so each FFT bin sums its assigned bands' gains weighted by
+        # the triangular overlap.
+        # Specifically: bin_gain[k] = sum_b band_gain[b] * band_to_bin[b, k] /
+        # sum_b band_to_bin[b, k]. Precompute the normalization here.
+        bin_norm = band_to_bin.sum(dim=0).clamp(min=1e-6)  # [n_freq]
+        self.register_buffer("band_to_bin", band_to_bin, persistent=False)
+        self.register_buffer("bin_norm", bin_norm, persistent=False)
+        self.register_buffer("window", torch.hann_window(n_fft), persistent=False)
+
+    def get_param_dict(self, params: torch.Tensor) -> Dict[str, torch.Tensor]:
+        # No human-readable param dict — gains are anonymous mel bands. Provide
+        # a flat dict for parity with the EQ logging callbacks.
+        return {f"band_{b:02d}_gain_db": params[:, b, :] for b in range(self.n_bands)}
+
+    def _band_to_bin_mask(self, band_gain_db: torch.Tensor) -> torch.Tensor:
+        """band_gain_db: [bs, n_bands] -> per-bin linear gain [bs, n_freq]."""
+        # band_gain_db @ band_to_bin -> per-bin sum-of-band gains in dB-weighted
+        # form; normalize by overlap so gain stays in dB units.
+        per_bin_db = (band_gain_db @ self.band_to_bin) / self.bin_norm
+        return torch.pow(10.0, per_bin_db / 20.0)  # [bs, n_freq]
+
+    def forward(
+        self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False,
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        bs, chs, T = x.shape
+        bs_c, n_chs_c, T_c = control_params.shape
+        assert chs == 1
+        assert bs_c == bs
+        assert n_chs_c == self.num_control_params
+
+        # Pad audio so length is a multiple of hop and we can run a clean iSTFT.
+        # torch.stft with center=True, hop=H, n_fft=N gives n_frames = T // H + 1.
+        if T % self.hop != 0:
+            pad = self.hop - (T % self.hop)
+            x = torch.nn.functional.pad(x, (0, pad))
+            control_params = torch.nn.functional.pad(
+                control_params, (0, pad), mode="replicate"
+            )
+            T_padded = T + pad
+        else:
+            T_padded = T
+
+        # Convert sigmoid [0,1] params to per-band gain in dB.
+        gain_db = self.min_gain_db + control_params * (self.max_gain_db - self.min_gain_db)
+        # Downsample to per-frame: each STFT frame i (centered) covers samples
+        # around [i*hop - n_fft/2, i*hop + n_fft/2]. Take the gain at i*hop as
+        # representative. With center=True, frame 0 is at sample 0.
+        # Simpler: average within each hop-sized window.
+        # gain_db: [bs, n_bands, T_padded]
+        n_frames = T_padded // self.hop + 1  # matches torch.stft(center=True)
+        # Reshape into [bs, n_bands, n_frames-1, hop] for averaging the first
+        # (n_frames-1) frames; the last frame uses the trailing hop's mean.
+        # Take gain at frame center indices [0, hop, 2*hop, ...].
+        # Prepend a hop/2-padded version so frame 0 gets a leading mean too.
+        # Cheap version: pick gain at each frame's hop-aligned sample.
+        idx = torch.arange(n_frames, device=x.device) * self.hop
+        idx = idx.clamp(max=T_padded - 1)
+        gain_db_frames = gain_db.index_select(-1, idx)   # [bs, n_bands, n_frames]
+
+        # STFT
+        x_flat = x.view(bs, T_padded)
+        spec = torch.stft(
+            x_flat, n_fft=self.n_fft, hop_length=self.hop,
+            win_length=self.n_fft, window=self.window,
+            return_complex=True, center=True,
+        )  # [bs, n_freq, n_frames]
+        # Per-frame per-bin gain mask.
+        # gain_db_frames -> [bs, n_frames, n_bands]
+        gain_db_frames_t = gain_db_frames.permute(0, 2, 1)
+        # mask: [bs, n_frames, n_freq]
+        mask = self._band_to_bin_mask(
+            gain_db_frames_t.reshape(bs * gain_db_frames_t.shape[1], self.n_bands)
+        ).view(bs, gain_db_frames_t.shape[1], -1)
+        # Align mask to spec frames
+        mask = mask.permute(0, 2, 1)  # [bs, n_freq, n_frames]
+        # Defensive: if mask has more or fewer frames than spec (rare with
+        # center=True boundary), trim/pad to match.
+        if mask.shape[-1] != spec.shape[-1]:
+            target = spec.shape[-1]
+            if mask.shape[-1] > target:
+                mask = mask[..., :target]
+            else:
+                last = mask[..., -1:].expand(-1, -1, target - mask.shape[-1])
+                mask = torch.cat([mask, last], dim=-1)
+
+        spec_out = spec * mask
+        y = torch.istft(
+            spec_out, n_fft=self.n_fft, hop_length=self.hop,
+            win_length=self.n_fft, window=self.window,
+            length=T_padded, center=True,
+        )
+        y = y.view(bs, 1, T_padded)
+        y = y[..., :T]
+        return y, self.get_param_dict(control_params[..., :T])
+
+
+# -----------------------------------------------------------------------------
 # Shelving EQ
 # -----------------------------------------------------------------------------
 

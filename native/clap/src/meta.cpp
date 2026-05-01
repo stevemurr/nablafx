@@ -64,6 +64,19 @@ DspBlockSpec parse_dsp_block(const json& j) {
             eq.bands.push_back(std::move(band));
         }
         out.params = std::move(eq);
+    } else if (out.kind == "spectral_mask_eq") {
+        SpectralMaskEqParams sm;
+        sm.sample_rate        = p.at("sample_rate").get<int>();
+        sm.block_size         = p.at("block_size").get<int>();
+        sm.num_control_params = p.at("num_control_params").get<int>();
+        sm.n_fft              = p.at("n_fft").get<int>();
+        sm.hop                = p.at("hop").get<int>();
+        sm.n_bands            = p.at("n_bands").get<int>();
+        sm.min_gain_db        = p.at("min_gain_db").get<float>();
+        sm.max_gain_db        = p.at("max_gain_db").get<float>();
+        sm.f_min              = p.at("f_min").get<float>();
+        sm.f_max              = p.at("f_max").get<float>();
+        out.params = std::move(sm);
     } else {
         throw std::runtime_error("unsupported dsp_block kind: " + out.kind);
     }

@@ -51,6 +51,7 @@
 #include "param_id.hpp"
 #include "parametric_eq_5band.hpp"
 #include "rational_a.hpp"
+#include "spectral_mask_eq.hpp"
 #include "true_peak_ceiling.hpp"
 
 namespace nablafx_tone {
@@ -58,12 +59,15 @@ namespace nablafx_tone {
 namespace fs = std::filesystem;
 using nablafx::CompositeMeta;
 using nablafx::ControlSpec;
+using nablafx::DspBlockSpec;
 using nablafx::LufsLeveler;
 using nablafx::ParametricEq5Band;
 using nablafx::ParametricEq5BandParams;
 using nablafx::PluginMeta;
 using nablafx::RationalA;
 using nablafx::RationalAParams;
+using nablafx::SpectralMaskEq;
+using nablafx::SpectralMaskEqParams;
 using nablafx::TruePeakCeiling;
 using nablafx::DimensionD;
 using nablafx::load_composite_meta;
@@ -257,11 +261,11 @@ struct ModuleState {
     std::unique_ptr<Ort::Env>  ort_env;
     // Pulled out of sat_meta once at load.
     RationalAParams            sat_rational;
-    // Pulled out of autoeq_metas[0] once at load. All classes share the same
-    // PEQ DSP layout (validated at compose time), so a single DSP block is
-    // enough to drive the downstream filter cascade for whichever class is
-    // currently active.
-    ParametricEq5BandParams    autoeq_eq;
+    // Per-class DSP-block payload, parsed once at load. A class's bundle may
+    // declare either ``parametric_eq_5band`` or ``spectral_mask_eq`` as its
+    // dsp_blocks[0]; the variant lets the audio thread dispatch by kind
+    // without a string compare per block.
+    std::vector<DspBlockSpec>  autoeq_dsp_per_class;
     int                        autoeq_default_idx{0};
 };
 
@@ -501,7 +505,12 @@ struct ChannelChain {
     // so a class switch starts the LSTM from a neutral init and avoids
     // bleeding stale activations from a different class's signal.
     std::vector<std::unique_ptr<OrtMiniSession>> autoeq_ort_per_class;
-    ParametricEq5Band                      autoeq_eq;
+    // Per-class DSP block. Exactly one of {peq, spec} is set per class index
+    // depending on the class meta's dsp_blocks[0].kind. Keeps mixed-kind
+    // multi-class working: e.g. CLS=full_mix can route through SpectralMaskEq
+    // while CLS=bass routes through ParametricEq5Band.
+    std::vector<std::unique_ptr<ParametricEq5Band>> autoeq_peq_per_class;
+    std::vector<std::unique_ptr<SpectralMaskEq>>    autoeq_spec_per_class;
     // Peak-hold envelope follower for auto-EQ controller input normalization.
     // Training normalized peak per ~10 s segment; using a per-128-block peak at
     // runtime collapsed the LSTM's input distribution. Attack-instant /
@@ -807,6 +816,10 @@ static bool plugin_activate(const clap_plugin_t* p, double sample_rate,
         const auto& classes = g_state->tone_meta.auto_eq.class_order;
         ch.autoeq_ort_per_class.clear();
         ch.autoeq_ort_per_class.reserve(classes.size());
+        ch.autoeq_peq_per_class.clear();
+        ch.autoeq_peq_per_class.resize(classes.size());
+        ch.autoeq_spec_per_class.clear();
+        ch.autoeq_spec_per_class.resize(classes.size());
         for (size_t i = 0; i < classes.size(); ++i) {
             const std::string& cls = classes[i];
             const std::string& dir = g_state->tone_meta.auto_eq.classes.at(cls);
@@ -814,8 +827,24 @@ static bool plugin_activate(const clap_plugin_t* p, double sample_rate,
                 *g_state->ort_env,
                 g_state->resources_dir + "/" + dir + "/model.onnx",
                 g_state->autoeq_metas[i]));
+
+            // Per-class DSP block instantiated according to the class meta's
+            // declared kind. Mixed-kind chains are valid (different classes
+            // can carry different EQ effectors).
+            const auto& dsp = g_state->autoeq_dsp_per_class[i];
+            if (dsp.kind == "parametric_eq_5band") {
+                ch.autoeq_peq_per_class[i] = std::make_unique<ParametricEq5Band>();
+                ch.autoeq_peq_per_class[i]->reset(
+                    std::get<ParametricEq5BandParams>(dsp.params));
+            } else if (dsp.kind == "spectral_mask_eq") {
+                ch.autoeq_spec_per_class[i] = std::make_unique<SpectralMaskEq>();
+                ch.autoeq_spec_per_class[i]->reset(
+                    std::get<SpectralMaskEqParams>(dsp.params));
+            } else {
+                throw std::runtime_error(
+                    "tone_plugin: unsupported auto_eq dsp kind: " + dsp.kind);
+            }
         }
-        ch.autoeq_eq.reset(g_state->autoeq_eq);
         ch.saturator.reset(g_state->sat_rational.numerator,
                            g_state->sat_rational.denominator);
 
@@ -988,10 +1017,20 @@ void flush_chain_block_(Plugin& plug,
                 }
             }
             const int cls = plug.active_autoeq_cls;
+            // The controller's output dimension differs by DSP kind:
+            //   parametric_eq_5band  → 15 (5 bands × {gain, freq, Q})
+            //   spectral_mask_eq     → n_bands (32 in the production model)
+            // Source it from the per-class meta so we don't hardcode here.
+            const auto& cls_dsp = g_state->autoeq_dsp_per_class[cls];
+            const bool  is_spec = (cls_dsp.kind == "spectral_mask_eq");
+            const int   n_params = is_spec
+                ? std::get<SpectralMaskEqParams>(cls_dsp.params).num_control_params
+                : std::get<ParametricEq5BandParams>(cls_dsp.params).num_control_params;
+            std::array<float, 64> eq_params_storage{};  // big enough for both kinds
+            float* eq_params = eq_params_storage.data();
             float* ch_buf[2] = {work_l, work_r};
             for (uint32_t ch=0; ch<n_ch; ++ch) {
                 float* blk = ch_buf[ch];
-                std::array<float,15> eq_params{};
                 auto& sess = plug.chains[ch].autoeq_ort_per_class[cls];
                 // The LSTM controller was trained on audio peak-normalised to 0.5
                 // *per ~10 s segment*. Per-128-sample peak normalisation collapses
@@ -1008,26 +1047,44 @@ void flush_chain_block_(Plugin& plug,
                           + (1.f - plug.autoeq_env_decay) * blk_peak;
                 const float ctrl_scale = (env > 1e-6f) ? (0.5f / env) : 1.f;
                 for (int i = 0; i < kBlockSize; ++i) ctrl_buf[i] = blk[i] * ctrl_scale;
-                sess->run_controller(ctrl_buf.data(),kBlockSize,eq_params.data(),15);
+                sess->run_controller(ctrl_buf.data(), kBlockSize, eq_params, n_params);
                 sess->swap_state();
-                for (int b=0;b<5;++b) {
-                    if (amt.eq_band_offsets[b]==0.f) continue;
-                    float& p=eq_params[kGainCh[b]];
-                    float db=kGainMin+p*kGainSpan+amt.eq_band_offsets[b];
-                    db=std::clamp(db,kGainMin,kGainMin+kGainSpan);
-                    p=(db-kGainMin)/kGainSpan;
+
+                if (!is_spec) {
+                    // Per-band manual EQ-offset trim (only meaningful for the
+                    // 5-band parametric kind). amt.eq_band_offsets has 5 entries.
+                    for (int b = 0; b < 5; ++b) {
+                        if (amt.eq_band_offsets[b] == 0.f) continue;
+                        float& p = eq_params[kGainCh[b]];
+                        float db = kGainMin + p * kGainSpan + amt.eq_band_offsets[b];
+                        db = std::clamp(db, kGainMin, kGainMin + kGainSpan);
+                        p  = (db - kGainMin) / kGainSpan;
+                    }
                 }
-                plug.chains[ch].autoeq_eq.set_params(eq_params.data(),eq_params.size());
-                // Push the 5 band gain_db values (channel 0 only) for the spectrum display.
-                if (ch == 0) {
-                    float gains[5];
-                    for (int b = 0; b < 5; ++b)
-                        gains[b] = kGainMin + eq_params[kGainCh[b]] * kGainSpan;
-                    plug.spectrum.set_eq_gains(gains);
+
+                std::copy_n(blk, kBlockSize, dry.data());
+                if (is_spec) {
+                    auto& dsp = plug.chains[ch].autoeq_spec_per_class[cls];
+                    dsp->set_params(eq_params, n_params);
+                    dsp->process(blk, wet_a.data(), kBlockSize);
+                    // No 5-band display for spectral mask — clear so the GUI
+                    // doesn't show stale PEQ band gains.
+                    if (ch == 0) {
+                        float gains[5] = {0.f, 0.f, 0.f, 0.f, 0.f};
+                        plug.spectrum.set_eq_gains(gains);
+                    }
+                } else {
+                    auto& dsp = plug.chains[ch].autoeq_peq_per_class[cls];
+                    dsp->set_params(eq_params, n_params);
+                    dsp->process(blk, wet_a.data(), kBlockSize);
+                    if (ch == 0) {
+                        float gains[5];
+                        for (int b = 0; b < 5; ++b)
+                            gains[b] = kGainMin + eq_params[kGainCh[b]] * kGainSpan;
+                        plug.spectrum.set_eq_gains(gains);
+                    }
                 }
-                std::copy_n(blk,kBlockSize,dry.data());
-                plug.chains[ch].autoeq_eq.process(blk,wet_a.data(),kBlockSize);
-                blend_(blk,dry.data(),wet_a.data(),amt.autoeq_wet_mix,kBlockSize);
+                blend_(blk, dry.data(), wet_a.data(), amt.autoeq_wet_mix, kBlockSize);
             }
             break;
         }
@@ -1510,8 +1567,13 @@ static bool entry_init(const char* /*plugin_path*/) {
             throw std::runtime_error("saturator sub-bundle has no dsp_blocks");
         }
         st->sat_rational = std::get<RationalAParams>(st->sat_meta.dsp_blocks[0].params);
-        st->autoeq_eq = std::get<ParametricEq5BandParams>(
-            st->autoeq_metas[0].dsp_blocks[0].params);
+        // Per-class DSP-block payloads. Different classes may declare
+        // different kinds (parametric_eq_5band vs spectral_mask_eq).
+        st->autoeq_dsp_per_class.clear();
+        st->autoeq_dsp_per_class.reserve(st->autoeq_metas.size());
+        for (const auto& m : st->autoeq_metas) {
+            st->autoeq_dsp_per_class.push_back(m.dsp_blocks[0]);
+        }
         st->autoeq_default_idx = static_cast<int>(
             st->autoeq_class_index.at(st->tone_meta.auto_eq.default_class));
 

@@ -25,6 +25,7 @@ _UNSUPPORTED_TOP_LEVEL = {
 _GREY_SUPPORTED_PROCESSORS = {
     "StaticRationalNonlinearity",  # → DspBlockSpec(kind="rational_a")
     "ParametricEQ",                # → DspBlockSpec(kind="parametric_eq_5band")
+    "SpectralMaskEQ",              # → DspBlockSpec(kind="spectral_mask_eq")
 }
 
 

@@ -53,10 +53,27 @@ struct ParametricEq5BandParams {
     std::vector<Band> bands;
 };
 
-using DspBlockParams = std::variant<RationalAParams, ParametricEq5BandParams>;
+// STFT-domain magnitude-mask EQ. Controller emits ``n_bands`` sigmoid values
+// per block; the C++ runtime computes the mel filterbank from the geometry
+// parameters (sample_rate, n_fft, n_bands, f_min, f_max) and applies the mask
+// via overlap-add. Latency is ``n_fft - hop`` samples.
+struct SpectralMaskEqParams {
+    int   sample_rate;
+    int   block_size;          // controller call cadence
+    int   num_control_params;  // == n_bands
+    int   n_fft;
+    int   hop;
+    int   n_bands;
+    float min_gain_db;
+    float max_gain_db;
+    float f_min;
+    float f_max;
+};
+
+using DspBlockParams = std::variant<RationalAParams, ParametricEq5BandParams, SpectralMaskEqParams>;
 
 struct DspBlockSpec {
-    std::string    kind;   // "rational_a" | "parametric_eq_5band"
+    std::string    kind;   // "rational_a" | "parametric_eq_5band" | "spectral_mask_eq"
     std::string    name;
     DspBlockParams params;
 };

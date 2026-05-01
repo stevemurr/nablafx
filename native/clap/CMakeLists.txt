@@ -68,6 +68,7 @@ target_link_libraries(tone_clap PRIVATE
     "-framework CoreFoundation"
     "-framework Cocoa"
     "-framework WebKit"
+    "-framework Accelerate"   # vDSP_fft for SpectralMaskEq
 )
 
 # Install the onnxruntime dylib next to ours and make each plugin find it

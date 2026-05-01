@@ -12,7 +12,7 @@ data:
   sample_length: 132300
   sample_rate: 44100
   preload: true
-  batch_size: 32
+  batch_size: 16
   num_workers: 4
   persistent_workers: true
 model:
@@ -23,15 +23,15 @@ model:
   model:
     _target_: nablafx.GreyBoxModel
     processors:
-    - _target_: nablafx.processors.ParametricEQ
+    - _target_: nablafx.processors.SpectralMaskEQ
       sample_rate: 44100
-      min_gain_db: -9.0
-      max_gain_db: 9.0
-      min_q_factor: 0.5
-      max_q_factor: 2.0
+      n_bands: 32
+      n_fft: 1024
+      hop: 512
+      min_gain_db: -18.0
+      max_gain_db: 18.0
       block_size: 128
       control_type: dynamic-spectral
-      freeze_freqs: true
     num_controls: 0
     stat_control_params_initial: rnd
     stat_cond_num_layers: 3
