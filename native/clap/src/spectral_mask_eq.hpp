@@ -83,6 +83,12 @@ public:
         // Mel filterbank.
         build_mel_(cfg_.sample_rate, n_fft_, n_bands_, cfg_.f_min, cfg_.f_max);
 
+        // 1/6-octave per-bin smoothing kernel, in dB domain. Kernel sigma
+        // scales with frequency (constant fraction of an octave), so LF bins
+        // get a near-degenerate kernel (one bin) and HF bins get a wide one.
+        build_freq_smoothing_kernel_(cfg_.sample_rate, n_fft_, /*octave_frac=*/1.0f / 6.0f);
+        bin_db_buf_.assign(n_freq_, 0.0f);
+
         // Per-bin gain mask (linear). bin_gain_target_ is the controller's
         // most recent prediction; bin_gain_ is the smoothed value the FFT
         // frame actually applies. set_params updates the target every
@@ -134,19 +140,28 @@ public:
             if (g > 1.0f) g = 1.0f;
             band_db[b] = cfg_.min_gain_db + g * gain_span;
         }
-        // bin_db[k] = sum_b band_to_bin_[b, k] * band_db[b] / bin_norm_[k];
-        // store the freshly-computed gain into bin_gain_target_ and let the
-        // smoother in run_frame_-time pull bin_gain_ toward it. (Smoothing in
-        // log/dB then exponentiating would be slightly more perceptual but
-        // the linear-domain pole is cheaper and indistinguishable at these
-        // time constants.)
+        // Step 1: per-bin gain in dB (linear band→bin mix).
         for (int k = 0; k < n_freq_; ++k) {
             float sum = 0.0f;
             for (int b = 0; b < n_bands_; ++b) {
                 sum += band_to_bin_[b * n_freq_ + k] * band_db[b];
             }
-            const float bin_db = (bin_norm_[k] > 1e-6f) ? (sum / bin_norm_[k]) : 0.0f;
-            bin_gain_target_[k] = std::pow(10.0f, bin_db / 20.0f);
+            bin_db_buf_[k] = (bin_norm_[k] > 1e-6f) ? (sum / bin_norm_[k]) : 0.0f;
+        }
+        // Step 2: smooth across frequency in dB using the precomputed
+        // 1/6-octave Gaussian kernel. Smooths band-edge interpolation wiggle
+        // and the partial-tone-jitter that produces "musical noise" on tonal
+        // mid/high content. dB smoothing → geometric mean in linear,
+        // perceptually well-behaved when adjacent bins differ by many dB.
+        for (int k = 0; k < n_freq_; ++k) {
+            const int   start = freq_kernel_start_[k];
+            const int   len   = freq_kernel_len_[k];
+            const int   wbase = freq_kernel_woff_[k];
+            float       acc   = 0.0f;
+            for (int j = 0; j < len; ++j) {
+                acc += freq_kernel_w_[wbase + j] * bin_db_buf_[start + j];
+            }
+            bin_gain_target_[k] = std::pow(10.0f, acc / 20.0f);
         }
         // Advance the smoother one step (per set_params tick = once per
         // block_size samples). At a ~25 ms time constant this knocks ~5 dB
@@ -255,6 +270,56 @@ private:
         out_avail_ += hop_;
     }
 
+    void build_freq_smoothing_kernel_(int sr, int n_fft, float octave_frac) {
+        // For each output bin k at frequency f_k, build a Gaussian kernel of
+        // sigma proportional to f_k (constant fraction of an octave). Stored
+        // as a ragged array via parallel start/len/woff arrays so the apply
+        // loop is just three small fetches per bin.
+        const int   n_freq      = n_fft / 2 + 1;
+        const float bin_hz      = sr / static_cast<float>(n_fft);
+        // half_octave_frac → sigma multiplier on f. e.g. octave_frac=1/6
+        // means a half-power half-width of 1/12 octave: sigma_hz = f * (2^(1/12) - 1).
+        const float sigma_coeff = std::pow(2.0f, 0.5f * octave_frac) - 1.0f;
+        const float min_sigma   = 1.0f;  // bins; floors LF kernel to ~1 bin
+        const int   max_kernel_half = 32; // hard cap so HF kernels stay sane
+
+        freq_kernel_start_.assign(n_freq, 0);
+        freq_kernel_len_.assign(n_freq, 1);
+        freq_kernel_woff_.assign(n_freq, 0);
+        freq_kernel_w_.clear();
+        freq_kernel_w_.reserve(n_freq * 8);
+
+        for (int k = 0; k < n_freq; ++k) {
+            const float f_k        = k * bin_hz;
+            float       sigma_bins = (f_k * sigma_coeff) / bin_hz;
+            if (sigma_bins < min_sigma) sigma_bins = min_sigma;
+            int half = static_cast<int>(std::ceil(2.0f * sigma_bins));
+            if (half > max_kernel_half) half = max_kernel_half;
+            int start = k - half;
+            int end   = k + half;
+            if (start < 0)         start = 0;
+            if (end   > n_freq - 1) end   = n_freq - 1;
+            const int len = end - start + 1;
+
+            // Compute and normalize the Gaussian.
+            const int   woff = static_cast<int>(freq_kernel_w_.size());
+            float       sum  = 0.0f;
+            for (int j = 0; j < len; ++j) {
+                const int   bin = start + j;
+                const float d   = static_cast<float>(bin - k) / sigma_bins;
+                const float w   = std::exp(-0.5f * d * d);
+                freq_kernel_w_.push_back(w);
+                sum += w;
+            }
+            if (sum > 0.0f) {
+                for (int j = 0; j < len; ++j) freq_kernel_w_[woff + j] /= sum;
+            }
+            freq_kernel_start_[k] = start;
+            freq_kernel_len_[k]   = len;
+            freq_kernel_woff_[k]  = woff;
+        }
+    }
+
     void build_mel_(int sr, int n_fft, int n_bands, float f_min, float f_max) {
         const int n_freq = n_fft / 2 + 1;
         const float mel_min = 2595.0f * std::log10(1.0f + f_min / 700.0f);
@@ -311,9 +376,17 @@ private:
 
     std::vector<float> band_to_bin_;     // [n_bands * n_freq]
     std::vector<float> bin_norm_;        // [n_freq]
-    std::vector<float> bin_gain_;        // [n_freq] linear, smoothed (consumed by FFT)
-    std::vector<float> bin_gain_target_; // [n_freq] linear, controller's latest target
-    float              mask_smooth_alpha_{0.f};  // per-set_params decay
+    std::vector<float> bin_gain_;        // [n_freq] linear, smoothed in time (consumed by FFT)
+    std::vector<float> bin_gain_target_; // [n_freq] linear, freq-smoothed controller target
+    std::vector<float> bin_db_buf_;      // [n_freq] scratch for per-bin dB before freq smoothing
+    float              mask_smooth_alpha_{0.f};  // per-set_params time decay
+    // Ragged 1/6-octave Gaussian kernel: per output bin k, the apply loop
+    // reads len kernels starting at woff and weights them against
+    // bin_db_buf_[start..start+len-1].
+    std::vector<int>   freq_kernel_start_;
+    std::vector<int>   freq_kernel_len_;
+    std::vector<int>   freq_kernel_woff_;
+    std::vector<float> freq_kernel_w_;
 
     // FFT scratch
     std::vector<float> windowed_;
