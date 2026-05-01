@@ -114,6 +114,13 @@ public:
         split_imag_.assign(n_fft_ / 2, 0.0f);
         time_out_.assign(n_fft_, 0.0f);
 
+        // Minimum-phase reconstruction scratch + output filter.
+        cep_split_real_.assign(n_fft_ / 2, 0.0f);
+        cep_split_imag_.assign(n_fft_ / 2, 0.0f);
+        cep_time_.assign(n_fft_, 0.0f);
+        h_mp_real_.assign(n_freq_, 1.0f);
+        h_mp_imag_.assign(n_freq_, 0.0f);
+
         // vDSP forward+inverse round-trip scale is 2*n_fft (Apple vDSP guide:
         // "divide by 2n to recover original values after inverse"). We apply
         // 1/(2*n_fft) in the OLA write and then divide per-sample by the
@@ -259,14 +266,26 @@ private:
         // After zrip-forward: split_real_[0] = DC,
         //                    split_imag_[0] = Nyquist real (packed),
         //                    split_real_[k]+i*split_imag_[k] = bin k for 0 < k < n_fft/2
-        // Apply mask. Note: vDSP packs Nyquist into [0].imag.
-        const float dc_mag      = split.realp[0];
-        const float nyquist_mag = split.imagp[0];
-        split.realp[0] = dc_mag      * bin_gain_[0];
-        split.imagp[0] = nyquist_mag * bin_gain_[n_freq_ - 1];
+        //
+        // Build a *minimum-phase* per-bin filter H_mp from the magnitude mask
+        // and apply it as a complex multiply. Same |H| as before, but the
+        // impulse response is causal and asymmetric — no pre-ring on HF cuts.
+        // Pre-ring was the dominant cause of the "loss of top-end energy"
+        // perception on transient material (kicks/cymbals smeared into the
+        // pre-strike silence by the symmetric IR).
+        compute_min_phase_(bin_gain_.data());
+        // DC and Nyquist are real for any min-phase filter from a real cepstrum.
+        const float dc_re      = split.realp[0];
+        const float ny_re      = split.imagp[0];
+        split.realp[0] = dc_re * h_mp_real_[0];
+        split.imagp[0] = ny_re * h_mp_real_[n_freq_ - 1];
         for (int k = 1; k < n_fft_ / 2; ++k) {
-            split.realp[k] *= bin_gain_[k];
-            split.imagp[k] *= bin_gain_[k];
+            const float xr = split.realp[k];
+            const float xi = split.imagp[k];
+            const float hr = h_mp_real_[k];
+            const float hi = h_mp_imag_[k];
+            split.realp[k] = xr * hr - xi * hi;
+            split.imagp[k] = xr * hi + xi * hr;
         }
 
         // Inverse FFT.
@@ -288,6 +307,70 @@ private:
         }
         out_write_ = (out_write_ + hop_) % ring_sz;
         out_avail_ += hop_;
+    }
+
+    // Build a minimum-phase per-bin filter from a magnitude vector
+    // ``mag[0..n_freq-1]``. Writes complex coefficients into h_mp_real_ /
+    // h_mp_imag_ (length n_freq). DC and Nyquist come out purely real.
+    //
+    // Recipe (Oppenheim & Schafer, "Real Cepstrum → Min-Phase"):
+    //   1. log_mag[k] = log(max(mag[k], floor))
+    //   2. Real cepstrum c[n] = IDFT{log_mag} (real-valued via conjugate
+    //      symmetry of log_mag).
+    //   3. c_min[n] = c[n] · w[n] where
+    //         w[0] = 1, w[1..N/2-1] = 2, w[N/2] = 1, w[N/2+1..N-1] = 0
+    //      → folds the anti-causal half of the cepstrum onto the causal half.
+    //   4. log H_mp[k] = DFT{c_min}.
+    //   5. H_mp[k] = exp(log H_mp[k]).
+    void compute_min_phase_(const float* mag) {
+        DSPSplitComplex cep_split{cep_split_real_.data(), cep_split_imag_.data()};
+
+        // Step 1+2: pack log|H| into rfft-input layout and run inverse rfft.
+        //   real[0] = log|H[0]|         (DC)
+        //   imag[0] = log|H[N/2]|       (Nyquist, packed)
+        //   real[k] = log|H[k]| imag[k] = 0 for k=1..N/2-1
+        constexpr float kFloor = 1e-7f;  // -140 dB
+        cep_split.realp[0] = std::log(std::max(mag[0],            kFloor));
+        cep_split.imagp[0] = std::log(std::max(mag[n_freq_ - 1],  kFloor));
+        for (int k = 1; k < n_fft_ / 2; ++k) {
+            cep_split.realp[k] = std::log(std::max(mag[k], kFloor));
+            cep_split.imagp[k] = 0.0f;
+        }
+        vDSP_fft_zrip(fft_setup_, &cep_split, 1, log2_nfft_, kFFTDirection_Inverse);
+        // Unpack split→interleaved real cepstrum (already real-valued, but vDSP
+        // returns it in the same split layout used for forward rfft outputs).
+        vDSP_ztoc(&cep_split, 1,
+                  reinterpret_cast<DSPComplex*>(cep_time_.data()), 2,
+                  n_fft_ / 2);
+
+        // Step 3: scale by 1/(2N) for true IDFT and apply the min-phase fold.
+        const float inv_2n = 1.0f / (2.0f * static_cast<float>(n_fft_));
+        cep_time_[0]            *= inv_2n * 1.0f;          // w[0] = 1
+        cep_time_[n_fft_ / 2]   *= inv_2n * 1.0f;          // w[N/2] = 1
+        for (int n = 1; n < n_fft_ / 2; ++n) {
+            cep_time_[n]              *= inv_2n * 2.0f;    // w[1..N/2-1] = 2
+            cep_time_[n_fft_ - n]      = 0.0f;             // anti-causal half → 0
+        }
+
+        // Step 4: forward rfft of c_min → log H_mp[k] (complex).
+        //   pack real signal back into split form, run forward FFT.
+        vDSP_ctoz(reinterpret_cast<DSPComplex*>(cep_time_.data()), 2,
+                  &cep_split, 1, n_fft_ / 2);
+        vDSP_fft_zrip(fft_setup_, &cep_split, 1, log2_nfft_, kFFTDirection_Forward);
+
+        // Step 5: H_mp[k] = exp(log_re + j*log_im) per bin.
+        // DC and Nyquist are real-only after a real-cepstrum min-phase build.
+        h_mp_real_[0]            = std::exp(cep_split.realp[0]);
+        h_mp_imag_[0]            = 0.0f;
+        h_mp_real_[n_freq_ - 1]  = std::exp(cep_split.imagp[0]);  // Nyquist
+        h_mp_imag_[n_freq_ - 1]  = 0.0f;
+        for (int k = 1; k < n_fft_ / 2; ++k) {
+            const float lr = cep_split.realp[k];
+            const float li = cep_split.imagp[k];
+            const float em = std::exp(lr);
+            h_mp_real_[k] = em * std::cos(li);
+            h_mp_imag_[k] = em * std::sin(li);
+        }
     }
 
     void recompute_alpha_() {
@@ -425,6 +508,13 @@ private:
     std::vector<float> split_real_;
     std::vector<float> split_imag_;
     std::vector<float> time_out_;
+
+    // Minimum-phase reconstruction scratch + output complex filter.
+    std::vector<float> cep_split_real_;
+    std::vector<float> cep_split_imag_;
+    std::vector<float> cep_time_;     // real cepstrum (length n_fft)
+    std::vector<float> h_mp_real_;    // [n_freq] complex H_mp
+    std::vector<float> h_mp_imag_;
 
     float ola_scale_{1.0f};
 };
