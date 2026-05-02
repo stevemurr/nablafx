@@ -1,1 +1,50 @@
-/home/murr/Code/neural-mastering/conf/model/tcn/model_bb_tcn_ssl_comp.yaml
+# SSL-style bus compressor emulator (fixed setting, peak-catcher mode,
+# 1 ms release).
+#
+# Causal TCN with 6 dilation blocks (1, 2, 4, 8, 16, 32) at kernel_size=11.
+# Receptive field = 1 + 10*63 = 631 samples ≈ 14 ms at 44.1 kHz. With the
+# QC's release fixed to 1 ms (~44 samples), the compressor's behavior is
+# essentially "catch peak, drop gain for the peak's duration, snap back" —
+# no long-term envelope/auto-release to model. RF=14ms is plenty.
+#
+# channel_width=16 keeps capacity for the VCA-color side of things while
+# the smaller block stack keeps total params ~10K and per-call compute
+# tiny. With kSslHop=2048 the runtime sits well under 1 GMAC/sec for the
+# whole stage.
+
+_target_: nablafx.BlackBoxSystem
+lr: 0.005
+use_callbacks: true
+log_media_every_n_steps: 2000
+model:
+  _target_: nablafx.BlackBoxModel
+  processor:
+    _target_: nablafx.processors.tcn.TCN
+    num_inputs: 1
+    num_outputs: 1
+    num_controls: 0
+    num_blocks: 6
+    kernel_size: 11
+    dilation_growth: 2
+    channel_width: 16
+    channel_growth: 1
+    stack_size: 6
+    groups: 1
+    bias: true
+    causal: true
+    batchnorm: false
+    residual: true
+    direct_path: false
+    cond_type: null
+    cond_block_size: 128
+    cond_num_layers: 1
+    act_type: tanh
+loss:
+  _target_: nablafx.evaluation.FlexibleLoss
+  losses:
+  - name: l1_loss
+    weight: 0.33
+    alias: l1
+  - name: mrstft_loss
+    weight: 0.67
+    alias: mrstft

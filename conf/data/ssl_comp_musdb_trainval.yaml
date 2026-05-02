@@ -1,1 +1,23 @@
-/home/murr/Code/neural-mastering/conf/data/ssl_comp_musdb_trainval.yaml
+_target_: nablafx.data.DryWetFilesPluginDataModule
+root_dir_dry: ${dataset_root}/ssl_comp_musdb/DRY/trainval
+root_dir_wet: ${dataset_root}/ssl_comp_musdb/WET/trainval
+# No conditioning controls — the model emulates one fixed SSL bus comp setting
+# (Bernie-style peak catcher). Knob exposure is deferred to a future
+# conditional model trained against a settings sweep.
+params_idxs_to_use: null
+data_to_use: 1.0
+trainval_split: 0.9
+sample_length: 132300  # 3.0 s @ 44.1 kHz
+sample_rate: 44100
+preload: true
+batch_size: 16
+num_workers: 4
+persistent_workers: true
+# Random gain in [low_db, high_db] applied identically to dry and wet so the
+# ratio is preserved; teaches level-dependent dynamics across the threshold
+# instead of memorising the single rendered operating point (peak ≈ 0 dBFS).
+# Asymmetric bias toward attenuation: rendered MUSDB stems are already hot
+# (peak -3 to -0 dBFS), so heavy positive gain pushes signals well past clip.
+# Wider downward range covers under-driven inputs (which is the failure mode);
+# small positive headroom still lets the model see slightly hotter material.
+gain_aug_db: [-18.0, 3.0]
