@@ -34,6 +34,8 @@ class PluginDataset(torch.utils.data.Dataset):
         sample_length: int = 48000,
         sample_rate: int = 48000,
         preload: bool = False,
+        gain_aug_db: Optional[List[float]] = None,
+        train: bool = True,
     ):
 
         self.root_dir_dry = root_dir_dry
@@ -42,6 +44,14 @@ class PluginDataset(torch.utils.data.Dataset):
         self.sample_length = sample_length
         self.sample_rate = sample_rate
         self.preload = preload
+        if gain_aug_db is None:
+            self.gain_aug_db = None
+        else:
+            lo, hi = float(gain_aug_db[0]), float(gain_aug_db[1])
+            if lo > hi:
+                raise ValueError(f"gain_aug_db must be [low, high] with low <= high, got [{lo}, {hi}]")
+            self.gain_aug_db = (lo, hi)
+        self.train = train
 
         # get file paths
         self.input_files = glob.glob(os.path.join(self.root_dir_dry, "*.input.wav"))
@@ -156,6 +166,12 @@ class PluginDataset(torch.utils.data.Dataset):
                     frame_offset=offset,
                     num_frames=self.sample_length,
                 )
+        if self.train and self.gain_aug_db is not None:
+            lo, hi = self.gain_aug_db
+            g_db = lo + torch.rand(1).item() * (hi - lo)
+            g = 10.0 ** (g_db / 20.0)
+            input = input * g
+            target = target * g
         return input, target
 
     def _load(self, filepath: str, frame_offset: int = 0, num_frames: int = -1) -> Tuple[torch.Tensor, int]:

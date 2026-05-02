@@ -75,7 +75,12 @@ def _load_system_and_weights(
     # Lightning ckpt contains optimizer state, hparams, etc.; weights_only=False
     # is appropriate because the ckpt comes from our own trusted training runs.
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-    system.load_state_dict(ckpt["state_dict"])
+    state = ckpt["state_dict"]
+    # torch.compile wraps modules and inserts an "_orig_mod." segment into
+    # parameter keys. Strip it so the uncompiled export module loads cleanly.
+    if any("._orig_mod." in k for k in state):
+        state = {k.replace("._orig_mod.", "."): v for k, v in state.items()}
+    system.load_state_dict(state)
     system.eval()
     return system
 

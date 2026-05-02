@@ -48,6 +48,7 @@ class DryWetFilesPluginDataModule(pl.LightningDataModule):
         num_workers: int = 4,
         persistent_workers: bool = False,
         prefetch_factor: int = 2,
+        gain_aug_db: Optional[List[float]] = None,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -63,6 +64,7 @@ class DryWetFilesPluginDataModule(pl.LightningDataModule):
         self.num_workers = num_workers
         self.persistent_workers = persistent_workers
         self.prefetch_factor = prefetch_factor
+        self.gain_aug_db = gain_aug_db
 
     def _loader_kwargs(self) -> dict:
         kwargs: dict = {
@@ -85,6 +87,8 @@ class DryWetFilesPluginDataModule(pl.LightningDataModule):
                     sample_length=self.sample_length,
                     sample_rate=self.sample_rate,
                     preload=self.preload,
+                    gain_aug_db=self.gain_aug_db,
+                    train=True,
                 )
             else:
                 self.trainval_dataset = ParametricPluginDataset(
@@ -114,6 +118,8 @@ class DryWetFilesPluginDataModule(pl.LightningDataModule):
                     sample_length=self.sample_length,
                     sample_rate=self.sample_rate,
                     preload=self.preload,
+                    gain_aug_db=None,
+                    train=False,
                 )
             else:
                 self.test_dataset = ParametricPluginDataset(
