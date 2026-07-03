@@ -467,7 +467,7 @@ class SSLConsoleEQ(torch.nn.Module):
             "hpf_freq": (10.0, 800.0),   "hpf_q": (0.4, 1.4),
             "lf_gain": g, "lf_freq": (30.0, 600.0),    "lf_q": (0.2, 2.0),  "lf_bellmix": (0.0, 1.0),
             "lmf_gain": g, "lmf_freq": (60.0, 3000.0), "lmf_q": (0.1, 4.0),
-            "hmf_gain": g, "hmf_freq": (400.0, 12000.0), "hmf_q": (0.1, 4.0),
+            "hmf_gain": g, "hmf_freq": (400.0, 20000.0), "hmf_q": (0.1, 4.0),
             "hf_gain": g, "hf_freq": (1500.0, 20000.0), "hf_q": (0.2, 2.0),  "hf_bellmix": (0.0, 1.0),
             "lpf_freq": (2000.0, 23000.0), "lpf_q": (0.4, 1.4),
         }
