@@ -2,7 +2,9 @@ import torch
 import lightning as pl
 from typing import List, Union, Optional
 
-from .datasets import PluginDataset, ParametricPluginDataset
+import os
+
+from .datasets import PluginDataset, ParametricPluginDataset, SSLParametricPluginDataset
 
 
 # -----------------------------------------------------------------------------
@@ -39,6 +41,7 @@ class DryWetFilesPluginDataModule(pl.LightningDataModule):
         root_dir_dry: str,
         root_dir_wet: str,
         params_idxs_to_use: Optional[Union[List[int], None]] = None,
+        params_sidecar: Optional[str] = None,
         data_to_use: float = 1.0,
         trainval_split: float = 0.8,
         sample_length: int = -1,
@@ -55,6 +58,7 @@ class DryWetFilesPluginDataModule(pl.LightningDataModule):
         self.root_dir_dry = root_dir_dry
         self.root_dir_wet = root_dir_wet
         self.params_idxs_to_use = params_idxs_to_use
+        self.params_sidecar = params_sidecar
         self.data_to_use = data_to_use
         self.trainval_split = trainval_split
         self.sample_length = sample_length
@@ -79,7 +83,19 @@ class DryWetFilesPluginDataModule(pl.LightningDataModule):
 
     def setup(self, stage: Optional[str] = None) -> None:
         if stage == "fit" or stage == "validate":
-            if self.params_idxs_to_use is None:
+            if self.params_sidecar is not None:
+                self.trainval_dataset = SSLParametricPluginDataset(
+                    root_dir_dry=self.root_dir_dry,
+                    root_dir_wet=self.root_dir_wet,
+                    params_sidecar=os.path.join(self.params_sidecar, "trainval.npz"),
+                    data_to_use=self.data_to_use,
+                    sample_length=self.sample_length,
+                    sample_rate=self.sample_rate,
+                    preload=self.preload,
+                    gain_aug_db=self.gain_aug_db,
+                    train=True,
+                )
+            elif self.params_idxs_to_use is None:
                 self.trainval_dataset = PluginDataset(
                     root_dir_dry=self.root_dir_dry,
                     root_dir_wet=self.root_dir_wet,
@@ -110,7 +126,19 @@ class DryWetFilesPluginDataModule(pl.LightningDataModule):
             print()
 
         if stage == "test":
-            if self.params_idxs_to_use is None:
+            if self.params_sidecar is not None:
+                self.test_dataset = SSLParametricPluginDataset(
+                    root_dir_dry=self.root_dir_dry,
+                    root_dir_wet=self.root_dir_wet,
+                    params_sidecar=os.path.join(self.params_sidecar, "test.npz"),
+                    data_to_use=self.data_to_use,
+                    sample_length=self.sample_length,
+                    sample_rate=self.sample_rate,
+                    preload=self.preload,
+                    gain_aug_db=None,
+                    train=False,
+                )
+            elif self.params_idxs_to_use is None:
                 self.test_dataset = PluginDataset(
                     root_dir_dry=self.root_dir_dry,
                     root_dir_wet=self.root_dir_wet,

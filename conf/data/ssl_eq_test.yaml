@@ -1,0 +1,16 @@
+# SSL 9000 J EQ — held-out test split (dataset `eval` -> `test`).
+# Contains the deliberate HMF-frequency holdout window: the true generalization
+# test. No gain augmentation. Conditioning from cond/test.npz.
+_target_: nablafx.data.DryWetFilesPluginDataModule
+root_dir_dry: ${dataset_root}/ssl_eq/DRY/test
+root_dir_wet: ${dataset_root}/ssl_eq/WET/test
+params_sidecar: ${dataset_root}/ssl_eq/cond   # dir holding {trainval,test}.npz
+data_to_use: 1.0
+trainval_split: 0.9
+sample_length: 144000
+sample_rate: 48000
+preload: false
+batch_size: 16
+num_workers: 8
+persistent_workers: true
+gain_aug_db: null

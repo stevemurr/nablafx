@@ -25,6 +25,7 @@ from .ddsp import (
     Gain,
     DCOffset,
     ParametricEQ,
+    SSLConsoleEQ,
     SpectralMaskEQ,
     ShelvingEQ,
     Peaking,

@@ -189,6 +189,118 @@ class PluginDataset(torch.utils.data.Dataset):
 
 
 # -----------------------------------------------------------------------------
+# Dataset class for the SSL console EQ (params from an npz sidecar, not filenames)
+# -----------------------------------------------------------------------------
+
+
+class SSLParametricPluginDataset(torch.utils.data.Dataset):
+    """Paired (dry, wet) MONO examples for the knob-conditioned SSL console EQ.
+
+    Layout produced by neural-mastering/scripts/prepare_ssl_eq_data.py:
+        <dry>/{name}.input.wav   <wet>/{name}.target.wav
+        <sidecar>/{split}.npz  -> names, cond (N, C), tf_mag_db (N, 256)
+
+    Unlike ParametricPluginDataset (which parses lossy params from filenames),
+    conditioning comes from the npz sidecar keyed by clip name — full float
+    precision for the ~20-dim physical vector. Returns (input, target, params).
+    The measured transfer function per name is kept in ``self.tf_by_name`` for the
+    Phase-3 TF-matching loss (not returned in the batch to preserve the 3-tuple
+    grey-box contract).
+    """
+
+    def __init__(
+        self,
+        root_dir_dry: str,
+        root_dir_wet: str,
+        params_sidecar: str,
+        data_to_use: float = 1.0,
+        sample_length: int = 144000,
+        sample_rate: int = 48000,
+        preload: bool = False,
+        gain_aug_db: Optional[List[float]] = None,
+        train: bool = True,
+    ):
+        self.root_dir_dry = root_dir_dry
+        self.root_dir_wet = root_dir_wet
+        self.sample_length = sample_length
+        self.sample_rate = sample_rate
+        self.preload = preload
+        self.train = train
+        self.gain_aug_db = None if gain_aug_db is None else (float(gain_aug_db[0]), float(gain_aug_db[1]))
+
+        side = np.load(params_sidecar, allow_pickle=True)
+        names = [str(n) for n in side["names"]]
+        cond = side["cond"].astype(np.float32)
+        tf = side["tf_mag_db"].astype(np.float32)
+        self.cond_by_name = {n: cond[i] for i, n in enumerate(names)}
+        self.tf_by_name = {n: tf[i] for i, n in enumerate(names)}
+        self.num_controls = cond.shape[1]
+
+        self.input_files = natsorted(glob.glob(os.path.join(root_dir_dry, "*.input.wav")))
+        self.target_files = natsorted(glob.glob(os.path.join(root_dir_wet, "*.target.wav")))
+
+        self.samples = []
+        self.num_frames = 0
+        for idx, (ifile, tfile) in enumerate(zip(self.input_files, self.target_files)):
+            name = os.path.basename(ifile).split(".")[-3]
+            if name != os.path.basename(tfile).split(".")[-3]:
+                raise RuntimeError(f"dry/wet mismatch: {ifile} vs {tfile}")
+            if name not in self.cond_by_name:
+                raise RuntimeError(f"no conditioning for {name} in {params_sidecar}")
+            params = torch.from_numpy(self.cond_by_name[name])
+            num_frames = _audio_num_frames(tfile)
+            self.num_frames += num_frames
+            inp = tgt = None
+            if preload:
+                inp, _ = self._load(ifile)
+                tgt, _ = self._load(tfile)
+                num_frames = int(min(inp.shape[-1], tgt.shape[-1]))
+            chunks = [(0, -1)] if sample_length == -1 else \
+                [(n * sample_length, (n + 1) * sample_length) for n in range(num_frames // sample_length)]
+            for off, end in chunks:
+                self.samples.append(dict(
+                    name=name, input_file=ifile, target_file=tfile, offset=off, params=params,
+                    input_audio=(inp if off == 0 and end == -1 else (inp[:, off:end] if inp is not None else None)),
+                    target_audio=(tgt if off == 0 and end == -1 else (tgt[:, off:end] if tgt is not None else None)),
+                ))
+
+        if data_to_use < 1.0:
+            n = int(len(self.samples) * data_to_use)
+            idxs = torch.randperm(len(self.samples))[:n]
+            self.samples = [self.samples[i] for i in idxs]
+        self.minutes = len(self.samples) * self.sample_length / self.sample_rate / 60.0
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        s = self.samples[idx]
+        if self.preload:
+            input, target = s["input_audio"], s["target_audio"]
+        elif self.sample_length == -1:
+            input, _ = self._load(s["input_file"])
+            target, _ = self._load(s["target_file"])
+        else:
+            input, _ = self._load(s["input_file"], s["offset"], self.sample_length)
+            target, _ = self._load(s["target_file"], s["offset"], self.sample_length)
+        if self.train and self.gain_aug_db is not None:
+            lo, hi = self.gain_aug_db
+            g = 10.0 ** ((lo + torch.rand(1).item() * (hi - lo)) / 20.0)
+            input, target = input * g, target * g
+        return input, target, s["params"]
+
+    def _load(self, filepath, frame_offset=0, num_frames=-1):
+        x, sr = torchaudio.load(filepath, frame_offset, num_frames, normalize=True, channels_first=True)
+        if sr != self.sample_rate:
+            x = torchaudio.functional.resample(x, sr, self.sample_rate)
+        return x, sr
+
+    def print(self):
+        print(f"\nSSLParametricPluginDataset: {len(self.samples)} samples, "
+              f"{self.num_controls} controls, {self.minutes:.1f} min")
+
+
+# -----------------------------------------------------------------------------
 # Dataset class for parametric models
 # -----------------------------------------------------------------------------
 

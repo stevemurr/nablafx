@@ -12,6 +12,9 @@ from .registry import EvaluationRegistry, register_function
 # Import flexible loss system
 from .flexible_loss import FlexibleLoss, FlexibleLossWithMetrics
 
+# Transfer-function magnitude loss (SSL console EQ grey-box)
+from .tf_loss import TransferFunctionMagLoss, predicted_tf_db
+
 # Import all evaluation functions to populate the registry
 from . import functions
 

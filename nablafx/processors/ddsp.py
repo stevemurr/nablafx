@@ -414,6 +414,155 @@ class ParametricEQ(torch.nn.Module):
 
 
 # -----------------------------------------------------------------------------
+# SSL 9000 J Console EQ (grey-box, knob-conditioned)
+# -----------------------------------------------------------------------------
+
+
+class SSLConsoleEQ(torch.nn.Module):
+    """Differentiable model of the SSL 9000 J channel-strip EQ topology:
+
+        HPF -> LF(shelf|bell) -> LMF(bell) -> HMF(bell) -> HF(shelf|bell) -> LPF
+
+    Driven by a knob-conditioned controller (``control_type="static-cond"``): a
+    small MLP maps the console knob vector to the ``num_control_params`` [0,1]
+    values below, which denormalize to physical (freq/gain/Q) and build a biquad
+    cascade recomputed at ``sample_rate`` — so the model is sample-rate correct
+    and its coefficients transfer to the C++ runtime (mirrors ``dsp.biquad``).
+
+    LF and HF each switch shelf<->bell via a learned blend channel ``*_bellmix``
+    (0 = shelf, 1 = bell): the section sos is ``mix*bell + (1-mix)*shelf`` (both
+    biquad-normalized to a0=1, so the blend is well-defined and exact at 0/1).
+    HPF/LPF are ``hpf_sections``/``lpf_sections`` cascaded biquads sharing one
+    cutoff+Q (the SSL HPF measures ~18 dB/oct — see docs/ssl_eq_phase0_findings).
+
+    The harmonic/analog coloration (``thd_db``) is intentionally NOT here; it is a
+    separate nonlinearity processor in the grey-box chain (see the ssl_eq config).
+    """
+
+    _CTRL = ["static", "static-cond", "dynamic", "dynamic-cond"]
+
+    def __init__(
+        self,
+        sample_rate: float,
+        min_gain_db: float = -18.0,
+        max_gain_db: float = 18.0,
+        block_size: int = 128,
+        control_type: str = "static-cond",
+        lr_multiplier: float = 1.0,
+        hpf_sections: int = 2,
+        lpf_sections: int = 1,
+    ):
+        super().__init__()
+        assert control_type in self._CTRL
+        self.sample_rate = sample_rate
+        self.control_type = control_type
+        self.lr_multiplier = lr_multiplier
+        self.block_size = block_size
+        self.hpf_sections = hpf_sections
+        self.lpf_sections = lpf_sections
+        g = (min_gain_db, max_gain_db)
+        # SSL-physical ranges (encompass the console's measured behaviour; the
+        # controller maps the knob vector into these). See Phase-0 findings.
+        self.param_ranges = {
+            "hpf_freq": (10.0, 800.0),   "hpf_q": (0.4, 1.4),
+            "lf_gain": g, "lf_freq": (30.0, 600.0),    "lf_q": (0.2, 2.0),  "lf_bellmix": (0.0, 1.0),
+            "lmf_gain": g, "lmf_freq": (60.0, 3000.0), "lmf_q": (0.1, 4.0),
+            "hmf_gain": g, "hmf_freq": (400.0, 12000.0), "hmf_q": (0.1, 4.0),
+            "hf_gain": g, "hf_freq": (1500.0, 20000.0), "hf_q": (0.2, 2.0),  "hf_bellmix": (0.0, 1.0),
+            "lpf_freq": (2000.0, 23000.0), "lpf_q": (0.4, 1.4),
+        }
+        self._keys = list(self.param_ranges.keys())
+        self.num_control_params = len(self._keys)  # 18
+
+        if control_type in ["dynamic", "dynamic-cond"]:
+            self.pool = torch.nn.AvgPool1d(kernel_size=block_size)
+
+    # -- param unpacking -------------------------------------------------------
+    def get_param_dict(self, params: torch.Tensor) -> Dict[str, torch.Tensor]:
+        param_dict = {k: params[:, i, :] for i, k in enumerate(self._keys)}
+        # bell-mix channels stay in [0,1]; everything else denormalizes physically
+        mix = {k: param_dict.pop(k) for k in ("lf_bellmix", "hf_bellmix")}
+        param_dict = denormalize_parameters(param_dict, self.param_ranges)
+        param_dict.update(mix)
+        return param_dict
+
+    # -- coefficient construction ---------------------------------------------
+    def compute_coefficients(self, sample_rate, p: Dict[str, torch.Tensor]) -> torch.Tensor:
+        bs = p["lf_gain"].size(0)
+        zero = torch.zeros_like(p["lf_gain"])
+
+        def blended(gain, freq, q, mix, high):
+            shelf = torch.cat(biquad(gain, freq, q, sample_rate,
+                                     "high_shelf" if high else "low_shelf"), dim=-1)
+            bell = torch.cat(biquad(gain, freq, q, sample_rate, "peaking"), dim=-1)
+            m = mix.view(bs, 1)
+            return m * bell + (1.0 - m) * shelf
+
+        def passf(freq, q, high):
+            return torch.cat(biquad(zero, freq, q, sample_rate,
+                                    "high_pass" if high else "low_pass"), dim=-1)
+
+        sections = []
+        sections += [passf(p["hpf_freq"], p["hpf_q"], True)] * self.hpf_sections
+        sections.append(blended(p["lf_gain"], p["lf_freq"], p["lf_q"], p["lf_bellmix"], False))
+        sections.append(torch.cat(biquad(p["lmf_gain"], p["lmf_freq"], p["lmf_q"], sample_rate, "peaking"), dim=-1))
+        sections.append(torch.cat(biquad(p["hmf_gain"], p["hmf_freq"], p["hmf_q"], sample_rate, "peaking"), dim=-1))
+        sections.append(blended(p["hf_gain"], p["hf_freq"], p["hf_q"], p["hf_bellmix"], True))
+        sections += [passf(p["lpf_freq"], p["lpf_q"], False)] * self.lpf_sections
+
+        return torch.stack(sections, dim=1)  # (bs, n_sos, 6)
+
+    def process(self, x, param_dict, train: bool = False):
+        sos = self.compute_coefficients(self.sample_rate, param_dict)
+        out = sosfilt_via_fsm(sos, x) if train else sosfilt(sos, x)
+        # The frequency-sampling filter returns a non-contiguous view; a
+        # downstream nonlinearity (rational-activations CUDA kernel) calls
+        # x.view(-1) which requires contiguity. Make the audio well-behaved.
+        return out.contiguous()
+
+    def forward(self, x: torch.Tensor, control_params: torch.Tensor, train: bool = False):
+        bs_x, chs_x, seq_len_x = x.size()
+        bs_c, chs_c, seq_len_c = control_params.size()
+        assert bs_x == bs_c and chs_x == 1 and chs_c == self.num_control_params
+        assert seq_len_c == 1 if self.control_type in ["static", "static-cond"] else seq_len_c == seq_len_x
+
+        if self.control_type in ["static", "static-cond"]:
+            param_dict = self.get_param_dict(control_params)
+            output = self.process(x, param_dict, train=train)
+        else:
+            if (seq_len_x % self.block_size) != 0:
+                pad = self.block_size - (seq_len_x % self.block_size)
+                x = torch.nn.functional.pad(x, (0, pad))
+                control_params = torch.nn.functional.pad(control_params, (0, pad), mode="replicate")
+            control_params = self.pool(control_params)
+            num_blocks = x.shape[-1] // self.block_size
+            output, pdl = [], []
+            for i in range(num_blocks):
+                xb = x[:, :, i * self.block_size:(i + 1) * self.block_size]
+                pd = self.get_param_dict(control_params[:, :, i:i + 1])
+                output.append(self.process(xb, pd, train=train))
+                pdl.append(pd)
+            output = torch.cat(output, dim=-1)[..., :seq_len_x]
+            param_dict = {k: torch.cat([pd[k] for pd in pdl], dim=-1) for k in pdl[0]}
+        return output, param_dict
+
+    # -- analytic helper: magnitude response in dB at arbitrary freqs ----------
+    def magnitude_db(self, control_params: torch.Tensor, freqs_hz: torch.Tensor) -> torch.Tensor:
+        """(bs, n_freq) dB magnitude of the cascade — for TF-loss / anchoring / tests."""
+        pd = self.get_param_dict(control_params)
+        sos = self.compute_coefficients(self.sample_rate, pd)  # (bs, n_sos, 6)
+        w = (2 * torch.pi * freqs_hz / self.sample_rate).view(1, 1, -1)
+        z1 = torch.exp(-1j * w)
+        z2 = z1 * z1
+        b = sos[..., 0:3].unsqueeze(-1)   # (bs, n_sos, 3, 1)
+        a = sos[..., 3:6].unsqueeze(-1)
+        num = b[:, :, 0] + b[:, :, 1] * z1 + b[:, :, 2] * z2
+        den = a[:, :, 0] + a[:, :, 1] * z1 + a[:, :, 2] * z2
+        h = (num / den).prod(dim=1)       # (bs, n_freq)
+        return 20 * torch.log10(h.abs().clamp_min(1e-9))
+
+
+# -----------------------------------------------------------------------------
 # Spectral Mask EQ
 # -----------------------------------------------------------------------------
 

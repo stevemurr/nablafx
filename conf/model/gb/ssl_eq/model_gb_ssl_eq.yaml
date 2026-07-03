@@ -1,0 +1,58 @@
+# SSL 9000 J channel EQ — knob-conditioned grey-box.
+#
+# A StaticCondController (MLP: 20 knob-conditioning inputs -> the 18 SSLConsoleEQ
+# DSP params) drives a differentiable biquad cascade
+#   HPF -> LF(shelf|bell) -> LMF -> HMF -> HF(shelf|bell) -> LPF
+# recomputed at 48 kHz (sample-rate correct; coeffs mirror dsp.biquad so they
+# transfer to the C++ runtime). A fixed learned rational waveshaper
+# (StaticRationalNonlinearity, version "A" == the plugin saturator's RationalA)
+# follows as the harmonic/analog-colour stage.
+#
+# Data: conf/data/ssl_eq_{trainval,test}.yaml (SSLParametricPluginDataset, npz
+# conditioning sidecar built by scripts/prepare_ssl_eq_data.py).
+#
+# NOTE (v1 scope): the harmonic stage is a *fixed* learned curve (captures the
+# console's baseline coloration, not thd_db-varying). thd_db-conditioned
+# harmonics is a v1.5 item (needs a conditioned nonlinearity). To train an
+# EQ-only baseline first, delete the StaticRationalNonlinearity processor below.
+#
+# VERIFY on first run: GreyBoxModel builds one StaticCondController for the
+# static-cond SSLConsoleEQ (sized to its 18 params) from the 20 num_controls,
+# and passes the trailing fixed nonlinearity through un-conditioned.
+
+_target_: nablafx.GreyBoxSystem
+lr: 0.005
+use_callbacks: true
+log_media_every_n_steps: 2000
+model:
+  _target_: nablafx.GreyBoxModel
+  processors:
+  - _target_: nablafx.processors.SSLConsoleEQ
+    sample_rate: 48000
+    min_gain_db: -18.0
+    max_gain_db: 18.0
+    block_size: 128
+    control_type: static-cond
+    hpf_sections: 2
+    lpf_sections: 1
+  - _target_: nablafx.processors.StaticRationalNonlinearity
+    sample_rate: 48000
+    degrees: [6, 5]
+    init_approx_func: tanh
+  num_controls: 20
+  stat_control_params_initial: rnd
+  stat_cond_num_layers: 3
+  stat_cond_hidden_dim: 32
+  dyn_block_size: 128
+  dyn_num_layers: 1
+  dyn_cond_block_size: 128
+  dyn_cond_num_layers: 1
+loss:
+  _target_: nablafx.evaluation.FlexibleLoss
+  losses:
+  - name: l1_loss
+    weight: 0.33
+    alias: l1
+  - name: mrstft_loss
+    weight: 0.67
+    alias: mrstft

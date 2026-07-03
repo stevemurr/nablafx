@@ -1,0 +1,41 @@
+# SSL 9000 J channel EQ — LINEAR (EQ-only) grey-box, no harmonic stage.
+#
+# The StaticCondController (20 knobs -> 18 SSLConsoleEQ params) drives the biquad
+# cascade alone. The fixed (unconditioned) rational harmonic stage is omitted: it
+# cannot distinguish thd-on (~65%) from thd-off examples, so it averages over both
+# and destabilizes training. This linear model is the clean v1 and is directly
+# comparable to the analytic biquad baseline (both purely linear). Add the
+# thd_db-conditioned harmonic separately in v1.5.
+
+_target_: nablafx.GreyBoxSystem
+lr: 0.001
+use_callbacks: true
+log_media_every_n_steps: 2000
+model:
+  _target_: nablafx.GreyBoxModel
+  processors:
+  - _target_: nablafx.processors.SSLConsoleEQ
+    sample_rate: 48000
+    min_gain_db: -18.0
+    max_gain_db: 18.0
+    block_size: 128
+    control_type: static-cond
+    hpf_sections: 2
+    lpf_sections: 1
+  num_controls: 20
+  stat_control_params_initial: rnd
+  stat_cond_num_layers: 3
+  stat_cond_hidden_dim: 32
+  dyn_block_size: 128
+  dyn_num_layers: 1
+  dyn_cond_block_size: 128
+  dyn_cond_num_layers: 1
+loss:
+  _target_: nablafx.evaluation.FlexibleLoss
+  losses:
+  - name: l1_loss
+    weight: 0.33
+    alias: l1
+  - name: mrstft_loss
+    weight: 0.67
+    alias: mrstft

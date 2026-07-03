@@ -1,0 +1,18 @@
+# SSL 9000 J EQ — train/val split (dataset `train` -> `trainval`).
+# Built by scripts/prepare_ssl_eq_data.py from /home/murr/Datasets/eq-dataset.
+# Conditioning comes from the npz sidecar (cond/trainval.npz), keyed by clip name.
+_target_: nablafx.data.DryWetFilesPluginDataModule
+root_dir_dry: ${dataset_root}/ssl_eq/DRY/trainval
+root_dir_wet: ${dataset_root}/ssl_eq/WET/trainval
+params_sidecar: ${dataset_root}/ssl_eq/cond   # dir holding {trainval,test}.npz
+data_to_use: 1.0
+trainval_split: 0.9
+sample_length: 144000  # 3.0 s @ 48 kHz (one full clip)
+sample_rate: 48000
+preload: false
+batch_size: 16
+num_workers: 8
+persistent_workers: true
+# Level augmentation applied identically to dry+wet: harmless to the linear EQ
+# (level-invariant) but exercises the level-dependent harmonic stage.
+gain_aug_db: [-12.0, 6.0]
